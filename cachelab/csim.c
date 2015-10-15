@@ -200,14 +200,20 @@ int find_evict_line(cache simulated_cache, long long set_index, int lines_num) {
 
 }
 
+/*
+ * Update the queue when access a line
+ */
 void update_queue(cache simulated_cache, long long set_index, int line_index) {
 
 	int rear = simulated_cache.sets[set_index].used_line_queue.rear;
+	int isExisted = 0;
 
 	int i, j;
 	for (i = 0; i <= rear; i++) {
 
 		if(simulated_cache.sets[set_index].used_line_queue.indexes[i] == line_index) {
+
+			isExisted = 1;
 			for (j = i; j < rear; j++) {
 
 				simulated_cache.sets[set_index].used_line_queue.indexes[j] = simulated_cache.sets[set_index].used_line_queue.indexes[j + 1];
@@ -215,13 +221,17 @@ void update_queue(cache simulated_cache, long long set_index, int line_index) {
 			}
 
 			simulated_cache.sets[set_index].used_line_queue.indexes[rear] = line_index;
+			break;
 
-		} else {
+		} 
 
-			simulated_cache.sets[set_index].used_line_queue.rear++;
-			simulated_cache.sets[set_index].used_line_queue.indexes[simulated_cache.sets[set_index].used_line_queue.rear] = line_index;
-		}
+	}
 
+	if (!isExisted) {
+
+		simulated_cache.sets[set_index].used_line_queue.rear++;
+		simulated_cache.sets[set_index].used_line_queue.indexes[simulated_cache.sets[set_index].used_line_queue.rear] = line_index;
+		
 	}
 }
 /*
