@@ -29,7 +29,7 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
     REQUIRES(M > 0);
     REQUIRES(N > 0);
 
-    int i, row_index, column_index;
+    int i, j, row_index, column_index;
     
     int a0, a1, a2, a3, a4, a5, a6, a7;
 
@@ -67,40 +67,77 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
             }
         }
 
+    } else if (N == 64) {
+
+        /*
+         * When N = 64, the address variance between two rows in the matrix varies only in 2 bits in the set bits, 8 * 8 sub-blocks will not be efficient
+         * If we only use 4 * 4 sub-blocks, we will lose the cache advantages by 4 bytes, since we have 8 blocks in each line
+         * So we maintain 8 * 8 sub-blocks and do the transformation in 4 * 4 inner sub-matrix in the 8 * 8 sub blocks 
+         */
+        for (column_index = 0; column_index < N; column_index += 8) {
+
+            for (row_index = 0; row_index < N; row_index += 8) {
+
+                for (i = row_index; i < row_index + 4; i++ ) {
+
+                    a0 = A[i][column_index + 0];
+                    a1 = A[i][column_index + 1];
+                    a2 = A[i][column_index + 2];
+                    a3 = A[i][column_index + 3];
+                    a4 = A[i][column_index + 4];
+                    a5 = A[i][column_index + 5];
+                    a6 = A[i][column_index + 6];
+                    a7 = A[i][column_index + 7];
+
+                    B[column_index + 0][i] = a0;
+                    B[column_index + 1][i] = a1;
+                    B[column_index + 2][i] = a2;
+                    B[column_index + 3][i] = a3;
+                    B[column_index + 0][i + 4] = a4;
+                    B[column_index + 1][i + 4] = a5;
+                    B[column_index + 2][i + 4] = a6;
+                    B[column_index + 3][i + 4] = a7;
+
+                }
+
+                for (i = 0; i < 4; i++) {
+
+                    a0 = A[row_index + 4][column_index + i];
+                    a1 = A[row_index + 5][column_index + i];
+                    a2 = A[row_index + 6][column_index + i];
+                    a3 = A[row_index + 7][column_index + i];
+                    
+                    a4 = B[row_index + i][column_index + 4];
+                    a5 = B[row_index + i][column_index + 5];
+                    a6 = B[row_index + i][column_index + 6];
+                    a7 = B[row_index + i][column_index + 7];
+
+                    B[row_index + i][column_index + 4] = a0;
+                    B[row_index + i][column_index + 5] = a1;
+                    B[row_index + i][column_index + 6] = a2;
+                    B[row_index + i][column_index + 7] = a3;
+
+                    B[row_index + 4 + i][column_index + 0] = a4;
+                    B[row_index + 4 + i][column_index + 1] = a5;
+                    B[row_index + 4 + i][column_index + 2] = a6;
+                    B[row_index + 4 + i][column_index + 3] = a7;
+
+                }
+
+                for (i = row_index + 4; i < row_index + 8; i++) {
+
+                    B[column_index + 4][i] = A[i][column_index + 4];
+                    B[column_index + 5][i] = A[i][column_index + 5];
+                    B[column_index + 6][i] = A[i][column_index + 6];
+                    B[column_index + 7][i] = A[i][column_index + 7];
+                }
+
+            }
+        }
+
     } 
-    // else if (N == 64) {
 
-    //     for (column_index = 0; column_index < N; column_index += 4) {
-
-    //         for (row_index = 0; row_index < N; row_index += 4) {
-
-    //             for (i = 0; i < row_index + 4; i++ ) {
-
-    //                 for (j = 0; j < column_index + 4; j++) {
-
-    //                     if (i != j) {
-
-    //                         B[j][i] = A[i][j];
-
-    //                     } else {
-
-    //                         diagonal_element = A[i][j];
-    //                         diagonal_index = i;
-
-    //                     }
-
-    //                 }
-
-    //                 if (row_index == column_index) {
-
-    //                     B[diagonal_index][diagonal_index] = diagonal_element;
-
-    //                 }
-    //             }
-    //         }
-    //     }
-
-    // } else {
+    // else {
 
     //     for (column_index = 0; column_index < M; column_index += 18) {
 
