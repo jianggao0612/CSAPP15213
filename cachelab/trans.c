@@ -1,5 +1,5 @@
 /* 
- * Gao Jiang - goaj
+ * Gao Jiang - gaoj
  *
  * trans.c - Matrix transpose B = A^T
  *
@@ -29,7 +29,7 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
     REQUIRES(M > 0);
     REQUIRES(N > 0);
 
-    int i, j, row_index, column_index;
+    int i, row_index, column_index;
     
     int a0, a1, a2, a3, a4, a5, a6, a7;
 
@@ -107,20 +107,20 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
                     a2 = A[row_index + 6][column_index + i];
                     a3 = A[row_index + 7][column_index + i];
                     
-                    a4 = B[row_index + i][column_index + 4];
-                    a5 = B[row_index + i][column_index + 5];
-                    a6 = B[row_index + i][column_index + 6];
-                    a7 = B[row_index + i][column_index + 7];
+                    a4 = B[column_index + i][row_index + 4];
+                    a5 = B[column_index + i][row_index + 5];
+                    a6 = B[column_index + i][row_index + 6];
+                    a7 = B[column_index + i][row_index + 7];
 
-                    B[row_index + i][column_index + 4] = a0;
-                    B[row_index + i][column_index + 5] = a1;
-                    B[row_index + i][column_index + 6] = a2;
-                    B[row_index + i][column_index + 7] = a3;
+                    B[column_index + i][row_index + 4] = a0;
+                    B[column_index + i][row_index + 5] = a1;
+                    B[column_index + i][row_index + 6] = a2;
+                    B[column_index + i][row_index + 7] = a3;
 
-                    B[row_index + 4 + i][column_index + 0] = a4;
-                    B[row_index + 4 + i][column_index + 1] = a5;
-                    B[row_index + 4 + i][column_index + 2] = a6;
-                    B[row_index + 4 + i][column_index + 3] = a7;
+                    B[column_index + 4 + i][row_index + 0] = a4;
+                    B[column_index + 4 + i][row_index + 1] = a5;
+                    B[column_index + 4 + i][row_index + 2] = a6;
+                    B[column_index + 4 + i][row_index + 3] = a7;
 
                 }
 
@@ -135,48 +135,38 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
             }
         }
 
-    } 
+    } else {
 
-    // else {
+        for (column_index = 0; column_index < M; column_index += 18) {
 
-    //     for (column_index = 0; column_index < M; column_index += 18) {
+            for (row_index = 0; row_index < N; row_index += 18) {
 
-    //         for (row_index = 0; row_index < N; row_index += 18) {
+                for(i = row_index; i < (row_index + 18) && (i < N); i++) {
 
-    //             for (i = 0; (i < row_index + 18) && (i < N); i++ ) {
+                    a0 = A[i][column_index + 0];
+                    a1 = A[i][column_index + 1];
+                    a2 = A[i][column_index + 2];
+                    a3 = A[i][column_index + 3];
+                    a4 = A[i][column_index + 4];
+                    a5 = A[i][column_index + 5];
+                    a6 = A[i][column_index + 6];
+                    a7 = A[i][column_index + 7];
 
-    //                 for (j = 0; (j < column_index + 18) && (j < M); j++) {
+                    B[column_index + 0][i] = a0;
+                    B[column_index + 1][i] = a1;
+                    B[column_index + 2][i] = a2;
+                    B[column_index + 3][i] = a3;
+                    B[column_index + 4][i] = a4;
+                    B[column_index + 5][i] = a5;
+                    B[column_index + 6][i] = a6;
+                    B[column_index + 7][i] = a7;
+                
+                }
 
-    //                     /*
-    //                      * The element in the "diagonal-ish" still doesn't need to be transposed even in a rectangle
-    //                      * Find the diagonal element in each small block (possible "diagonal-ish" element in the complete matrix)
-    //                      */
-    //                     if (i != j) {
+            }
+        }
 
-    //                         B[j][i] = A[i][j];
-
-    //                     } else {
-
-    //                         diagonal_element = A[i][j];
-    //                         diagonal_index = i;
-
-    //                     }
-
-    //                 }
-
-    //                 /*
-    //                  * Put the diagnal element to matrix B in the "diagonal-ish" place
-    //                  */
-    //                 if (row_index == column_index) {
-
-    //                     B[diagonal_index][diagonal_index] = diagonal_element;
-
-    //                 }
-    //             }
-    //         }
-    //     }
-
-    // }
+    }
 
     ENSURES(is_transpose(M, N, A, B));
 }
