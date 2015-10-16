@@ -113,7 +113,7 @@ cache create_cache(long long s, long long E, long long b) {
 /*
  * free_cache - Free the space of a cache 
  */
-void free_cache(cache used_cache, long long s, long long E, long long b) {
+void free_cache(cache* used_cache, long long s, long long E, long long b) {
 
 	int set_index;
 	cache_set set;
@@ -124,7 +124,7 @@ void free_cache(cache used_cache, long long s, long long E, long long b) {
 	 */
 	for (set_index = 0; set_index < S; set_index++) {
 		
-		set = used_cache.sets[set_index];
+		set = used_cache -> sets[set_index];
 
 		if (set.used_line_queue.indexes != NULL) {
 			free(set.used_line_queue.indexes);
@@ -139,8 +139,8 @@ void free_cache(cache used_cache, long long s, long long E, long long b) {
 	/*
 	 * Free the space of the sets
 	 */
-	if (used_cache.sets != NULL) {
-		free(used_cache.sets);
+	if (used_cache -> sets != NULL) {
+		free(used_cache -> sets);
 	}
 
 }
@@ -148,7 +148,7 @@ void free_cache(cache used_cache, long long s, long long E, long long b) {
 /*
  * find_empty_line - find an empty line in a set to put in new line when missed
  */
-int find_empty_line(cache simulated_cache, long long set_index, int lines_num) {
+int find_empty_line(cache* simulated_cache, long long set_index, int lines_num) {
 	
 	int line_index; // loop variable
 	int empty_line = -1; // result empty line index
@@ -159,7 +159,7 @@ int find_empty_line(cache simulated_cache, long long set_index, int lines_num) {
 	 */
 	for (line_index = 0; line_index < lines_num; line_index++) {
 		
-		line = simulated_cache.sets[set_index].lines[line_index];
+		line = simulated_cache -> sets[set_index].lines[line_index];
 
 		if (line.valid == 0) {
 			empty_line = line_index;
@@ -176,11 +176,11 @@ int find_empty_line(cache simulated_cache, long long set_index, int lines_num) {
 /*
  * find_evict_line - find an line in a set to put in new line when missed based LRU
  */
-int find_evict_line(cache simulated_cache, long long set_index, int lines_num) {
+int find_evict_line(cache* simulated_cache, long long set_index, int lines_num) {
 
-	int rear = simulated_cache.sets[set_index].used_line_queue.rear;
+	int rear = simulated_cache -> sets[set_index].used_line_queue.rear;
 
-	int evict_line_index = simulated_cache.sets[set_index].used_line_queue.indexes[0]; // get the first line index in the index queue
+	int evict_line_index = simulated_cache -> sets[set_index].used_line_queue.indexes[0]; // get the first line index in the index queue
 
 	/*
 	 * remove the first elements int the queue
@@ -188,11 +188,11 @@ int find_evict_line(cache simulated_cache, long long set_index, int lines_num) {
 	int i;
 	for (i = 0; i < rear - 1; i++) {
 
-		simulated_cache.sets[set_index].used_line_queue.indexes[i] = simulated_cache.sets[set_index].used_line_queue.indexes[i + 1];
+		simulated_cache -> sets[set_index].used_line_queue.indexes[i] = simulated_cache -> sets[set_index].used_line_queue.indexes[i + 1];
 
 	}
-	simulated_cache.sets[set_index].used_line_queue.indexes[rear] = -1;
-	simulated_cache.sets[set_index].used_line_queue.rear--;
+	simulated_cache -> sets[set_index].used_line_queue.indexes[rear] = -1;
+	simulated_cache -> sets[set_index].used_line_queue.rear--;
 
 	// printf("Evicted line: %d\n", evict_line_index);
 
@@ -203,41 +203,50 @@ int find_evict_line(cache simulated_cache, long long set_index, int lines_num) {
 /*
  * Update the queue when access a line
  */
-void update_queue(cache simulated_cache, long long set_index, int line_index) {
+void update_queue(cache* simulated_cache, long long set_index, int line_index) {
 
-	int rear = simulated_cache.sets[set_index].used_line_queue.rear;
-	int isExisted = 0;
+	int rear = simulated_cache -> sets[set_index].used_line_queue.rear;
+	int isExisted = 0; // a flag represent whether the line index is already existed in the queue
 
+	/*
+	 * Go through the queue to find line index
+	 */
 	int i, j;
 	for (i = 0; i <= rear; i++) {
 
-		if(simulated_cache.sets[set_index].used_line_queue.indexes[i] == line_index) {
+		/*
+		 * if line index is existed, move it the the rear of the queue
+		 */
+		if(simulated_cache -> sets[set_index].used_line_queue.indexes[i] == line_index) {
 
 			isExisted = 1;
 			for (j = i; j < rear; j++) {
 
-				simulated_cache.sets[set_index].used_line_queue.indexes[j] = simulated_cache.sets[set_index].used_line_queue.indexes[j + 1];
+				simulated_cache -> sets[set_index].used_line_queue.indexes[j] = simulated_cache -> sets[set_index].used_line_queue.indexes[j + 1];
 
 			}
 
-			simulated_cache.sets[set_index].used_line_queue.indexes[rear] = line_index;
+			simulated_cache -> sets[set_index].used_line_queue.indexes[rear] = line_index;
 			break;
 
 		} 
 
 	}
 
+	/*
+	 * If line index is not existed, put it in the rear of the queue
+	 */
 	if (!isExisted) {
 
-		simulated_cache.sets[set_index].used_line_queue.rear++;
-		simulated_cache.sets[set_index].used_line_queue.indexes[simulated_cache.sets[set_index].used_line_queue.rear] = line_index;
-		
+		simulated_cache -> sets[set_index].used_line_queue.rear++;
+		simulated_cache -> sets[set_index].used_line_queue.indexes[simulated_cache -> sets[set_index].used_line_queue.rear] = line_index;
+
 	}
 }
 /*
  * simulated_cache - simulate the cache based on the given parameters from command line
  */
-cache_output_param simulated_cache(cache sim_cache, cache_built_param params, cache_output_param output, unsigned long long int address) {
+cache_output_param simulated_cache(cache* sim_cache, cache_built_param params, cache_output_param output, unsigned long long int address) {
 	
 	int line_index;
 	int replace_line_index = -1; // flag - represent the line in the set to be replaced
@@ -253,7 +262,7 @@ cache_output_param simulated_cache(cache sim_cache, cache_built_param params, ca
 	unsigned long long int input_setIndex = address << (tag_size) >> (tag_size + params.b);
 
 	// find the set in the cache to be accessed
-	cache_set target_set = sim_cache.sets[input_setIndex];
+	cache_set target_set = sim_cache -> sets[input_setIndex];
 	cache_line line;
 
 	/*
@@ -297,18 +306,18 @@ cache_output_param simulated_cache(cache sim_cache, cache_built_param params, ca
 
 		if(replace_line_index != -1) {
 
-			sim_cache.sets[input_setIndex].lines[replace_line_index].valid = 1;
-			sim_cache.sets[input_setIndex].lines[replace_line_index].tag = input_tag;
-			sim_cache.sets[input_setIndex].used_line_queue.rear++;
-			sim_cache.sets[input_setIndex].used_line_queue.indexes[sim_cache.sets[input_setIndex].used_line_queue.rear] = replace_line_index;
+			sim_cache -> sets[input_setIndex].lines[replace_line_index].valid = 1;
+			sim_cache -> sets[input_setIndex].lines[replace_line_index].tag = input_tag;
+			sim_cache -> sets[input_setIndex].used_line_queue.rear++;
+			sim_cache -> sets[input_setIndex].used_line_queue.indexes[sim_cache -> sets[input_setIndex].used_line_queue.rear] = replace_line_index;
 
 		} else {
 
 			replace_line_index = find_evict_line(sim_cache, input_setIndex, lines_num);
-			sim_cache.sets[input_setIndex].lines[replace_line_index].tag = input_tag;
+			sim_cache -> sets[input_setIndex].lines[replace_line_index].tag = input_tag;
 			output.evicts++;
-			sim_cache.sets[input_setIndex].used_line_queue.rear++;
-			sim_cache.sets[input_setIndex].used_line_queue.indexes[sim_cache.sets[input_setIndex].used_line_queue.rear] = replace_line_index;
+			sim_cache -> sets[input_setIndex].used_line_queue.rear++;
+			sim_cache -> sets[input_setIndex].used_line_queue.indexes[sim_cache -> sets[input_setIndex].used_line_queue.rear] = replace_line_index;
 			printf("Got a evict. Evicts %d.\n", output.evicts);
 
 		}
@@ -384,16 +393,16 @@ int main(int argc, char **argv) {
 					break;
 				case 'S':
 					printf("%c %llx %d\n", trace_op, address, size);
-					output = simulated_cache(new_cache, param, output, address);
+					output = simulated_cache(&new_cache, param, output, address);
 					break;
 				case 'L':
 					printf("%c %llx %d\n", trace_op, address, size);
-					output = simulated_cache(new_cache, param, output, address);
+					output = simulated_cache(&new_cache, param, output, address);
 					break;
 				case 'M':
 					printf("%c %llx %d\n", trace_op, address, size);
-					output = simulated_cache(new_cache, param, output, address);
-					output = simulated_cache(new_cache, param, output, address);
+					output = simulated_cache(&new_cache, param, output, address);
+					output = simulated_cache(&new_cache, param, output, address);
 					break;
 				default:
 					break;
@@ -403,7 +412,7 @@ int main(int argc, char **argv) {
 		}
 
 		printSummary(output.hits, output.misses, output.evicts); // print out the result
-		free_cache(new_cache, param.s, param.E, param.b);
+		free_cache(&new_cache, param.s, param.E, param.b);
 		fclose(input_file);
 
 		return 0;
