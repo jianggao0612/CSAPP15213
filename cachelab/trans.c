@@ -34,15 +34,20 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
     
     int a0, a1, a2, a3, a4, a5, a6, a7;
 
-    /*
-     * deal with square-matrix
-     */
+    
     if (N == 32) {
 
+        /*
+         *  When N = M = 32, the variance between two rows in the matrix varies in 3 bits, which results in 8 different sets, thus a 8 * 8 sub-block is efficient
+         */
         for (column_index = 0; column_index < N; column_index += 8) {
 
             for (row_index = 0; row_index < N; row_index += 8) {
 
+                /*
+                 * Since A and B share the same cache set address, if we don't store the values of A, then when we access B, the row of B will override the cache of A
+                 * Use the 8 local variables to store each row of A and let B occupy the cache
+                 */
                 for(i = row_index; i < row_index + 8; i++) {
 
                     a0 = A[i][column_index + 0];
@@ -79,6 +84,10 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 
             for (row_index = 0; row_index < N; row_index += 8) {
 
+                /*
+                 * For the first 4 * 4 matrix in the upper-left, do normal transpose
+                 * For the second 4 * 4 matrix in the upper-right, do transpose but store the transposed matrix still on the upper-right of B(not the intended bottom-left)
+                 */
                 for (i = row_index; i < row_index + 4; i++ ) {
 
                     a0 = A[i][column_index + 0];
@@ -101,6 +110,11 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 
                 }
 
+                /*
+                 * Deal with the second 4 * 4 matrix and third 4 * 4 matrix together
+                 * Since A has already in cache, do line access of A won't cause new misses
+                 * Access B in row will reduce misses
+                 */
                 for (i = 0; i < 4; i++) {
 
                     a0 = A[row_index + 4][column_index + i];
@@ -125,6 +139,9 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 
                 }
 
+                /*
+                 * Deal with the fourth bottom-right 4 * 4 matrix
+                 */
                 for (i = row_index + 4; i < row_index + 8; i++) {
 
                     B[column_index + 4][i] = A[i][column_index + 4];
@@ -138,6 +155,9 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 
     } else {
 
+        /*
+         * For rectangle matrix, after experienmental trial, larger sub-blocks works efficiently
+         */
         for (column_index = 0; column_index < M; column_index += 18) {
 
             for (row_index = 0; row_index < N; row_index += 18) {

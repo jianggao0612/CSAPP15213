@@ -99,13 +99,13 @@ cache_t create_cache(cache_param_t* param) {
 	// for each set, initialize the lines
 	for (set_index = 0; set_index < S; set_index++) {
 
-		set.lines = (cache_line_t *) malloc(sizeof(cache_line_t) * E); // allocate space for lines in a set
-		set.queue.indexes = (int *) malloc(sizeof(int) * E);
+		set.lines = (cache_line_t *) malloc(sizeof(cache_line_t) * (param -> E)); // allocate space for lines in a set
+		set.queue.indexes = (int *) malloc(sizeof(int) * (param -> E));
 
 		/*
 		 * initialize each line and the used line queue in the set
 		 */
-		for (line_index = 0; line_index < E; line_index++) {
+		for (line_index = 0; line_index < (param -> E); line_index++) {
 
 			line.valid = 0;
 			line.tag = 0;
@@ -153,7 +153,7 @@ void free_cache(cache_t* sim_cache, cache_param_t* param) {
 	/*
 	 * Free the space of the sets
 	 */
-	if ((sim_cache -> sets) != NULL {
+	if ((sim_cache -> sets) != NULL) {
 
 		free(sim_cache -> sets);
 
@@ -184,8 +184,9 @@ int find_empty_line(cache_t* sim_cache, long long set_index, int line_num) {
 
 	 	}
 
-	 	return empty_line;
 	 }
+
+	 return empty_line;
 
 }
 
@@ -306,7 +307,7 @@ void simulated_cache(cache_t* sim_cache, cache_param_t* param, output_param_t* o
 int main(int argc, char **argv) {
 
 	cache_param_t param;
-	output_param output;
+	output_param_t output;
 	output.hits = 0;
 	output.misses = 0;
 	output.evicts = 0;
@@ -338,7 +339,7 @@ int main(int argc, char **argv) {
 			case 't':
 				trace_file = optarg;
 				break;
-			default;
+			default:
 				break;
 
 		}
@@ -374,16 +375,16 @@ int main(int argc, char **argv) {
 					break;
 				case 'S':
 					printf("%c %llx %d\n", trace_op, address, size);
-					output = simulated_cache(&new_cache, &param, &output, address);
+					simulated_cache(&new_cache, &param, &output, address);
 					break;
 				case 'L':
 					printf("%c %llx %d\n", trace_op, address, size);
-					output = simulated_cache(&new_cache, &param, &output, address);
+					simulated_cache(&new_cache, &param, &output, address);
 					break;
 				case 'M':
 					printf("%c %llx %d\n", trace_op, address, size);
-					output = simulated_cache(&new_cache, &param, &output, address);
-					output = simulated_cache(&new_cache, &param, &output, address);
+					simulated_cache(&new_cache, &param, &output, address);
+					simulated_cache(&new_cache, &param, &output, address);
 					break;
 				default:
 					break;
