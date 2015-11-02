@@ -196,9 +196,9 @@ int main(int argc, char **argv)
     int output_fd;
     int job_id;
     struct job_t *job;
-    sigset_t *set;
+    sigset_t set;
 
-    sigemptyset(set); // set a empty sigset for sigsuspend
+    sigemptyset(&set); // set a empty sigset for sigsuspend
 
     switch (token -> builtins) {
 
@@ -331,9 +331,9 @@ int main(int argc, char **argv)
 
              }
 
-             while (fgpid(job -> pid)) {
+             while (fgpid(job_list)) {
 
-                sigsuspend(set);
+                sigsuspend(&set);
 
              }
 
@@ -364,6 +364,9 @@ void eval(char *cmdline)
     struct cmdline_tokens tok;
 	pid_t pid; /* process id of each process */ 
 	struct job_t *job;
+    sigset set;
+    int input_fd, output_fd; /* input and output redirect file descriptor */
+
     /* Parse command line */
     bg = parseline(cmdline, &tok); 
 
@@ -373,10 +376,52 @@ void eval(char *cmdline)
     if (tok.argv[0] == NULL) /* ignore empty lines */
         return;
 	
+    /*
+     * Determine whether the command is builtin command
+     * If so, handled by the helper function
+     * If not, fork a child process and handle it
+     */
     if (!cmd_builtins(&tok)) {
+
+        /*
+         * Block signals before the parent add the child into job list to avoid race condition and ensure parent can reap child process
+         */
+        sigemptyset(&set);
+        sigaddset(&set, SIGINT);
+        sigaddset(&set, SIGTSTP);
+        sigaddset(&set, SIGCHLD);
+
+        if (sigprocmask(SIG_BLOCK, &set, NULL) < 0) {
+
+            unix_error("sigprocmask failed.\n");
+
+        }
 		
 		// in child process
         if ((pid = fork()) == 0) {
+
+            // unblock the signal set for receiving signals 
+            if (sigprocmask(SIG_UNBLOCK, &set, NULL) < 0) {
+
+                unix_error("sigprocmask failed.\n");
+
+            }
+
+            // redirect the input file descriptor
+            if (tok.infile != NULL) {
+
+                input_fd = open(tok.infile, O_RDONLY);
+                dup2(input_fd, 0);
+
+            }
+
+            // redirect the output file descriptor
+            if (tok.outfile != NULL) {
+
+                output_fd = open(tok.outfile, O_WRONLY);
+                dup2(output_fd, 1);
+
+            }
             
 			// execute a non-builtin process
 			if( execve(tok.argv[0], tok.argv, NULL) < 0 ) {
@@ -385,16 +430,39 @@ void eval(char *cmdline)
 				exit(0);
 
 			}
-			// if the process can be executed in the child process, add it to the job list
-			addjob (job_list, pid, bg ? BG : FG, cmdline);
+
+            // asign unique group process to each child process - set the the group id as the process id
+            if (setpgid(0, 0) < 0) {
+
+                unix_error("set process group failed.\n");
+                return;
+
+            }
+
         }
+
+        // parent process add the child process in the job list
+        addjob (job_list, pid, bg ? BG : FG, cmdline);	
 		
-		
-		// if the child process is not a bg process, parent process should wait for it
+		/*
+         * In the parent process, determine whehter the child process is a foreground process
+         * If so, parent process should wait for it
+         * If not, leave it as a background job
+         */
 		if (!bg) {
 
-			wait(NULL);
-		
+            if (sigemptyset(&set) < 0) {
+
+                unix_error("set empty set failed.\n");
+
+            }
+
+            while (fgpid(job_list)) {
+
+                sigsuspend(&set); // wait until get the signal that the foreground child process finishes
+
+            }
+            		
 		 } else {
 			
 			job = getjobpid(job_list, pid);	
@@ -428,8 +496,7 @@ void eval(char *cmdline)
  *             are statically allocated inside parseline() and will be 
  *             overwritten the next time this function is invoked.
  */
-int 
-parseline(const char *cmdline, struct cmdline_tokens *tok) 
+int parseline(const char *cmdline, struct cmdline_tokens *tok) 
 {
 
     static char array[MAXLINE];          /* holds local copy of command line */
@@ -567,8 +634,7 @@ parseline(const char *cmdline, struct cmdline_tokens *tok)
  *     handler reaps all available zombie children, but doesn't wait 
  *     for any other currently running children to terminate.  
  */
-void 
-sigchld_handler(int sig) 
+void sigchld_handler(int sig) 
 {
     return;
 }
@@ -578,8 +644,7 @@ sigchld_handler(int sig)
  *    user types ctrl-c at the keyboard.  Catch it and send it along
  *    to the foreground job.  
  */
-void 
-sigint_handler(int sig) 
+void sigint_handler(int sig) 
 {
     return;
 }
@@ -589,8 +654,7 @@ sigint_handler(int sig)
  *     the user types ctrl-z at the keyboard. Catch it and suspend the
  *     foreground job by sending it a SIGTSTP.  
  */
-void 
-sigtstp_handler(int sig) 
+void sigtstp_handler(int sig) 
 {
     return;
 }
