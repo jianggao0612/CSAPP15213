@@ -1,7 +1,8 @@
 /* 
  * tsh - A tiny shell program with job control
  * 
- * Gao Jiang - gaoj
+ * Name: Gao Jiang
+ * AndrewID: gaoj
  */
 #include <assert.h>
 #include <stdio.h>
@@ -634,8 +635,37 @@ int parseline(const char *cmdline, struct cmdline_tokens *tok)
  *     handler reaps all available zombie children, but doesn't wait 
  *     for any other currently running children to terminate.  
  */
-void sigchld_handler(int sig) 
-{
+void sigchld_handler(int sig) {
+
+    int status;
+    pid_t pid;
+
+    /*
+     * Reap child with the pid if the child is stopped or terminated
+     * If a child is terminated normally, delete the child from the job list
+     * If a child is stopped by a signal, set the job status as stopped
+     * If a child is terminated by a signal that was not caught, delete the child from the job list
+     */
+    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED) > 0)) {
+
+        if (WIFEXITED(status)) {
+
+            deletejob(job_list, pid); // the child ternimated normally
+
+        } else if (WIFSTOPSIG(status)) {
+
+            printf("Job [%d] (%d) is stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+            getjobpid(pid) -> status = ST; // the child was stopped by a signal 
+
+        } else if (WIFSIGNALED(status)) { // the child was terminated by a signal that was not caught
+
+            deletejob(job_list, pid);
+            printf("Job [%d] (%d) is ternimated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+
+        }
+
+
+    }
     return;
 }
 
@@ -644,8 +674,16 @@ void sigchld_handler(int sig)
  *    user types ctrl-c at the keyboard.  Catch it and send it along
  *    to the foreground job.  
  */
-void sigint_handler(int sig) 
-{
+void sigint_handler(int sig) {
+
+    pid_t pid = fgpid(job_list); // get the pid of the foreground job
+
+    if (pid != 0) {
+
+        kill(-pid, SIGINT); // send signals to the process group and terminate all the process
+
+    }
+
     return;
 }
 
@@ -654,8 +692,15 @@ void sigint_handler(int sig)
  *     the user types ctrl-z at the keyboard. Catch it and suspend the
  *     foreground job by sending it a SIGTSTP.  
  */
-void sigtstp_handler(int sig) 
-{
+void sigtstp_handler(int sig) {
+
+    pid_t pid = fgpid(job_list); // get the pid of the foreground job
+
+    if (pid != 0) {
+
+        kill(-pid, SIGTSTP); // send signals to the process group and stop all the process
+
+    }
     return;
 }
 
@@ -668,8 +713,7 @@ void sigtstp_handler(int sig)
  **********************************************/
 
 /* clearjob - Clear the entries in a job struct */
-void 
-clearjob(struct job_t *job) {
+void clearjob(struct job_t *job) {
     job->pid = 0;
     job->jid = 0;
     job->state = UNDEF;
@@ -677,8 +721,7 @@ clearjob(struct job_t *job) {
 }
 
 /* initjobs - Initialize the job list */
-void 
-initjobs(struct job_t *job_list) {
+void initjobs(struct job_t *job_list) {
     int i;
 
     for (i = 0; i < MAXJOBS; i++)
@@ -686,8 +729,7 @@ initjobs(struct job_t *job_list) {
 }
 
 /* maxjid - Returns largest allocated job ID */
-int 
-maxjid(struct job_t *job_list) 
+int maxjid(struct job_t *job_list) 
 {
     int i, max=0;
 
@@ -698,8 +740,7 @@ maxjid(struct job_t *job_list)
 }
 
 /* addjob - Add a job to the job list */
-int 
-addjob(struct job_t *job_list, pid_t pid, int state, char *cmdline) 
+int addjob(struct job_t *job_list, pid_t pid, int state, char *cmdline) 
 {
     int i;
 
@@ -728,8 +769,7 @@ addjob(struct job_t *job_list, pid_t pid, int state, char *cmdline)
 }
 
 /* deletejob - Delete a job whose PID=pid from the job list */
-int 
-deletejob(struct job_t *job_list, pid_t pid) 
+int deletejob(struct job_t *job_list, pid_t pid) 
 {
     int i;
 
@@ -747,8 +787,7 @@ deletejob(struct job_t *job_list, pid_t pid)
 }
 
 /* fgpid - Return PID of current foreground job, 0 if no such job */
-pid_t 
-fgpid(struct job_t *job_list) {
+pid_t fgpid(struct job_t *job_list) {
     int i;
 
     for (i = 0; i < MAXJOBS; i++)
@@ -758,8 +797,7 @@ fgpid(struct job_t *job_list) {
 }
 
 /* getjobpid  - Find a job (by PID) on the job list */
-struct job_t 
-*getjobpid(struct job_t *job_list, pid_t pid) {
+struct job_t *getjobpid(struct job_t *job_list, pid_t pid) {
     int i;
 
     if (pid < 1)
@@ -784,8 +822,7 @@ struct job_t *getjobjid(struct job_t *job_list, int jid)
 }
 
 /* pid2jid - Map process ID to job ID */
-int 
-pid2jid(pid_t pid) 
+int pid2jid(pid_t pid) 
 {
     int i;
 
@@ -852,8 +889,7 @@ void listjobs(struct job_t *job_list, int output_fd)
 /*
  * usage - print a help message
  */
-void 
-usage(void) 
+void usage(void) 
 {
     printf("Usage: shell [-hvp]\n");
     printf("   -h   print this message\n");
@@ -865,8 +901,7 @@ usage(void)
 /*
  * unix_error - unix-style error routine
  */
-void 
-unix_error(char *msg)
+void unix_error(char *msg)
 {
     fprintf(stdout, "%s: %s\n", msg, strerror(errno));
     exit(1);
@@ -875,8 +910,7 @@ unix_error(char *msg)
 /*
  * app_error - application-style error routine
  */
-void 
-app_error(char *msg)
+void app_error(char *msg)
 {
     fprintf(stdout, "%s\n", msg);
     exit(1);
@@ -885,8 +919,7 @@ app_error(char *msg)
 /*
  * Signal - wrapper for the sigaction function
  */
-handler_t 
-*Signal(int signum, handler_t *handler) 
+handler_t *Signal(int signum, handler_t *handler) 
 {
     struct sigaction action, old_action;
 
@@ -903,8 +936,7 @@ handler_t
  * sigquit_handler - The driver program can gracefully terminate the
  *    child shell by sending it a SIGQUIT signal.
  */
-void 
-sigquit_handler(int sig) 
+void sigquit_handler(int sig) 
 {
     printf("Terminating after receipt of SIGQUIT signal\n");
     exit(1);
