@@ -193,22 +193,158 @@ int main(int argc, char **argv)
  */
  int cmd_builtins(struct cmdline_tokens *token) {
     FILE *output_file = NULL;
+    int output_fd;
+    int job_id;
+    struct job_t *job;
+    sigset_t *set;
 
-    switch(token -> builtins) {
+    sigemptyset(set); // set a empty sigset for sigsuspend
+
+    switch (token -> builtins) {
 
         case BUILTIN_NONE:
             return 0; 
 
         case BUILTIN_QUIT:
-            quit(0);
+            exit(0);
 
         case BUILTIN_JOBS:
+			
+            /*
+             * Determine whether there is redirect output file
+             * If so, list jobs on the output file
+             * If not, list jobs on stardard system out
+             */
+            if (token -> outfile != NULL) { 
 
-            if ((token -> outfile) != NULL) 
+                output_fd = open(token -> outfile, O_RDWR); // try to get the redirect file descriptor
 
-                if 
+                /*
+                 * If get the file descriptor failed, try to open the file first
+                 */
+                if (output_fd < 0) {
+
+                    output_file = fopen(token -> outfile, "w");
+                    output_fd = open(token -> outfile, O_RDWR); // get the file descriptor again
+
+                }
+
+                listjobs(job_list, output_fd); // list jobs to the redirect file
+
+                if (output_file != NULL) {
+
+                    fclose(output_file);
+
+                }
+
+                close(output_fd);
+
+            } else {
+				
+				printf("Enter else.\n");
+                listjobs(job_list, STDOUT_FILENO); // if there is no redirect output file, print jobs on standard system out
+            }
+
+            return 1;
+
+        case BUILTIN_BG:
+
+            /*
+             * Determine whether there is job id in the command
+             * If so, get the job by job id
+             * If not, get the job by process id
+             */
+            if (token -> argv[(token -> argc) - 1][0] == '%') {
+
+                job_id = atoi((token -> argv[(token -> argc) - 1]) + 1); // get the job id, which is in the last argument except for the first %
+                job = getjobjid(job_list, job_id);
+
+                if (job == NULL) {
+
+                    printf("Job %d doesn't exit.\n", job_id);
+                    return 1;
+                }
+
+            } else {
+
+                job = getjobpid(job_list, token -> argv[(token -> argc) - 1]); // get the job with pid
+
+                if (job == NULL) {
+
+                    printf("Process %s doesn't exit.\n", token -> argv[1]);
+                    return 1;
+
+                }
 
             }
+
+            if (job -> state != BG) {
+
+                printf("Current process is not a background job.\n");
+
+            }
+
+            printf("[%d] (%d) %s", job -> jid, job -> pid, cmdline); // print out the BG job presentition to the screen
+            job -> state = BG; // set the job as background job
+            kill(-(job -> pid), SIGCONT); // send signals to every process in the process group to continue
+
+            return 1;
+
+        case BUILTIN_FG:
+
+            /*
+             * Determine whether there is job id in the command
+             * If so, get the job by job id
+             * If not, get the job by process id
+             */
+            if (token -> argv[(token -> argc) - 1][0] == '%') {
+
+                job_id = atoi((token -> argv[(token -> argc) - 1]) + 1); // get the job id, which is in the last argument except for the first %
+                job = getjobjid(job_list, job_id);
+
+                if (job == NULL) {
+
+                    printf("Job %d doesn't exit.\n", job_id);
+                    return 1;
+                }
+
+            } else {
+
+                job = getjobpid(job_list, token -> argv[(token -> argc) - 1]); // get the job with pid
+
+                if (job == NULL) {
+
+                    printf("Process %s doesn't exit.\n", token -> argv[1]);
+                    return 1;
+
+                }
+
+            }
+
+            /*
+             * Determine whether the job is stopped or in the background, which is legal to bring foreground
+             */
+             if ((job -> state != ST) && (job -> state != BG)) {
+
+                printf("Current process is not a background job. Illegal to bring foreground.\n");
+                return 1;
+
+             }
+
+             while (fgpid(job -> pid)) {
+
+                sigsuspend(set);
+
+             }
+
+             job -> state = FG; // set the job as foreground job
+             kill(-(job -> pid), SIGCONT); // send signals to every other process in the process group to continue
+
+             return 1;
+
+        default:
+            return 0;
+
     }
  }
 /* 
@@ -226,14 +362,47 @@ void eval(char *cmdline)
 {
     int bg; /* should the job run in bg or fg? */
     struct cmdline_tokens tok;
-
+	pid_t pid; /* process id of each process */ 
+	struct job_t *job;
     /* Parse command line */
     bg = parseline(cmdline, &tok); 
 
     if (bg == -1) /* parsing error */
         return;
+
     if (tok.argv[0] == NULL) /* ignore empty lines */
         return;
+	
+    if (!cmd_builtins(&tok)) {
+		
+		// in child process
+        if ((pid = fork()) == 0) {
+            
+			// execute a non-builtin process
+			if( execve(tok.argv[0], tok.argv, NULL) < 0 ) {
+				
+				printf("%s: Command not found!\n", tok.argv[0]);
+				exit(0);
+
+			}
+			// if the process can be executed in the child process, add it to the job list
+			addjob (job_list, pid, bg ? BG : FG, cmdline);
+        }
+		
+		
+		// if the child process is not a bg process, parent process should wait for it
+		if (!bg) {
+
+			wait(NULL);
+		
+		 } else {
+			
+			job = getjobpid(job_list, pid);	
+			printf("[%d] (%d) %s", job -> jid, job -> pid, cmdline);
+			
+		 }
+
+    }
 
     return;
 }
@@ -566,8 +735,7 @@ pid2jid(pid_t pid)
 }
 
 /* listjobs - Print the job list */
-void 
-listjobs(struct job_t *job_list, int output_fd) 
+void listjobs(struct job_t *job_list, int output_fd) 
 {
     int i;
     char buf[MAXLINE];
