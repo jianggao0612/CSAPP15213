@@ -268,7 +268,7 @@ int main(int argc, char **argv)
 
             } else {
 
-                job = getjobpid(job_list, token -> argv[(token -> argc) - 1]); // get the job with pid
+                job = getjobpid(job_list, atoi(token -> argv[(token -> argc) - 1])); // get the job with pid
 
                 if (job == NULL) {
 
@@ -285,7 +285,7 @@ int main(int argc, char **argv)
 
             }
 
-            printf("[%d] (%d) %s", job -> jid, job -> pid, cmdline); // print out the BG job presentition to the screen
+            printf("[%d] (%d) %s", job -> jid, job -> pid, job -> cmdline); // print out the BG job presentition to the screen
             job -> state = BG; // set the job as background job
             kill(-(job -> pid), SIGCONT); // send signals to every process in the process group to continue
 
@@ -311,7 +311,7 @@ int main(int argc, char **argv)
 
             } else {
 
-                job = getjobpid(job_list, token -> argv[(token -> argc) - 1]); // get the job with pid
+                job = getjobpid(job_list, atoi(token -> argv[(token -> argc) - 1])); // get the job with pid
 
                 if (job == NULL) {
 
@@ -365,7 +365,7 @@ void eval(char *cmdline)
     struct cmdline_tokens tok;
 	pid_t pid; /* process id of each process */ 
 	struct job_t *job;
-    sigset set;
+    sigset_t set;
     int input_fd, output_fd; /* input and output redirect file descriptor */
 
     /* Parse command line */
@@ -425,7 +425,7 @@ void eval(char *cmdline)
             }
             
 			// execute a non-builtin process
-			if( execve(tok.argv[0], tok.argv, NULL) < 0 ) {
+			if( execve(tok.argv[0], tok.argv, environ) < 0 ) {
 				
 				printf("%s: Command not found!\n", tok.argv[0]);
 				exit(0);
@@ -652,10 +652,10 @@ void sigchld_handler(int sig) {
 
             deletejob(job_list, pid); // the child ternimated normally
 
-        } else if (WIFSTOPSIG(status)) {
+        } else if (WIFSTOPPED(status)) {
 
             printf("Job [%d] (%d) is stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
-            getjobpid(pid) -> status = ST; // the child was stopped by a signal 
+            getjobpid(job_list, pid) -> state = ST; // the child was stopped by a signal 
 
         } else if (WIFSIGNALED(status)) { // the child was terminated by a signal that was not caught
 
