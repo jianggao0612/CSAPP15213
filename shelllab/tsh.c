@@ -172,6 +172,7 @@ int main(int argc, char **argv)
         cmdline[strlen(cmdline)-1] = '\0';
         
         /* Evaluate the command line */
+		//fprintf(stderr, "got cmd:%s\n", cmdline);
         eval(cmdline);
         
         fflush(stdout);
@@ -361,11 +362,13 @@ int main(int argc, char **argv)
  */
 void eval(char *cmdline) 
 {
+	//fprintf(stderr, "enter eval\n");
     int bg; /* should the job run in bg or fg? */
     struct cmdline_tokens tok;
 	pid_t pid; /* process id of each process */ 
 	struct job_t *job;
     sigset_t set;
+	sigset_t prev_set;
     int input_fd, output_fd; /* input and output redirect file descriptor */
 
     /* Parse command line */
@@ -392,7 +395,7 @@ void eval(char *cmdline)
         sigaddset(&set, SIGTSTP);
         sigaddset(&set, SIGCHLD);
 
-        if (sigprocmask(SIG_BLOCK, &set, NULL) < 0) {
+        if (sigprocmask(SIG_BLOCK, &set, &prev_set) < 0) {
 
             unix_error("sigprocmask failed.\n");
 
@@ -400,9 +403,19 @@ void eval(char *cmdline)
 		
 		// in child process
         if ((pid = fork()) == 0) {
+			//fprintf(stderr, "child fork\n");
+ 			
+			// asign unique group process to each child process 
+			// set the the group id as the process id
+            if (setpgid(0, 0) < 0) {
 
-            // unblock the signal set for receiving signals 
-            if (sigprocmask(SIG_UNBLOCK, &set, NULL) < 0) {
+                unix_error("set process group failed.\n");
+                return;
+
+            }           
+			
+			// unblock the signal set for receiving signals 
+            if (sigprocmask(SIG_UNBLOCK, &set, &prev_set) < 0) {
 
                 unix_error("sigprocmask failed.\n");
 
@@ -423,7 +436,7 @@ void eval(char *cmdline)
                 dup2(output_fd, 1);
 
             }
-            
+           	//fprintf(stderr, "try to run child process with cmd:%s\n", tok.argv[0]); 
 			// execute a non-builtin process
 			if( execve(tok.argv[0], tok.argv, environ) < 0 ) {
 				
@@ -431,18 +444,21 @@ void eval(char *cmdline)
 				exit(0);
 
 			}
-
-            // asign unique group process to each child process - set the the group id as the process id
-            if (setpgid(0, 0) < 0) {
-
-                unix_error("set process group failed.\n");
-                return;
-
-            }
+			/* restore input and output */
+    		if (tok.infile) {
+        		if (dup2(input_fd, 0) < 0) 
+					printf("Failed to restore stdin\n");
+    		}
+    		if (tok.outfile) {
+        		if (dup2(output_fd, 1) < 0) 
+					printf("Failed to restore stdout\n");
+    		}	
+			//fprintf(stderr, "child process finished\n");
 
         }
 
         // parent process add the child process in the job list
+		//fprintf(stderr, "parents add child pid:%d\n", pid);
         addjob (job_list, pid, bg ? BG : FG, cmdline);	
 		
 		/*
@@ -452,17 +468,12 @@ void eval(char *cmdline)
          */
 		if (!bg) {
 
-            if (sigemptyset(&set) < 0) {
-
-                unix_error("set empty set failed.\n");
-
-            }
-
             while (fgpid(job_list)) {
-
-                sigsuspend(&set); // wait until get the signal that the foreground child process finishes
+				//fprintf(stderr, "parent tries to wait, cmd:%s\n", tok.argv[0]);
+                sigsuspend(&prev_set); // wait until get the signal that the foreground child process finishes
 
             }
+			//fprintf(stderr, "parent find all fg process finished\n");
             		
 		 } else {
 			
@@ -470,6 +481,7 @@ void eval(char *cmdline)
 			printf("[%d] (%d) %s", job -> jid, job -> pid, cmdline);
 			
 		 }
+		sigprocmask(SIG_UNBLOCK, &set, &prev_set);
 
     }
 
@@ -639,17 +651,17 @@ void sigchld_handler(int sig) {
 
     int status;
     pid_t pid;
-
+	//fprintf(stderr, "got and sigchld signal\n");
     /*
      * Reap child with the pid if the child is stopped or terminated
      * If a child is terminated normally, delete the child from the job list
      * If a child is stopped by a signal, set the job status as stopped
      * If a child is terminated by a signal that was not caught, delete the child from the job list
      */
-    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED) > 0)) {
+    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) >= 0) {
 
         if (WIFEXITED(status)) {
-
+			//fprintf(stderr, "try to delete job in handler for pid:%d\n", pid);
             deletejob(job_list, pid); // the child ternimated normally
 
         } else if (WIFSTOPPED(status)) {
@@ -772,7 +784,7 @@ int addjob(struct job_t *job_list, pid_t pid, int state, char *cmdline)
 int deletejob(struct job_t *job_list, pid_t pid) 
 {
     int i;
-
+	//fprintf(stderr, "try to delete job:%d\n", pid);
     if (pid < 1)
         return 0;
 
@@ -790,9 +802,12 @@ int deletejob(struct job_t *job_list, pid_t pid)
 pid_t fgpid(struct job_t *job_list) {
     int i;
 
-    for (i = 0; i < MAXJOBS; i++)
-        if (job_list[i].state == FG)
+    for (i = 0; i < MAXJOBS; i++) {
+        if (job_list[i].state == FG) {
+			//fprintf(stderr, "current foreground job:%d\n", job_list[i].pid);
             return job_list[i].pid;
+		}
+	}
     return 0;
 }
 
@@ -846,7 +861,7 @@ void listjobs(struct job_t *job_list, int output_fd)
         if (job_list[i].pid != 0) {
             sprintf(buf, "[%d] (%d) ", job_list[i].jid, job_list[i].pid);
             if(write(output_fd, buf, strlen(buf)) < 0) {
-                fprintf(stderr, "Error writing to output file\n");
+                //fprintf(stderr, "Error writing to output file\n");
                 exit(1);
             }
             memset(buf, '\0', MAXLINE);
@@ -865,13 +880,13 @@ void listjobs(struct job_t *job_list, int output_fd)
                         i, job_list[i].state);
             }
             if(write(output_fd, buf, strlen(buf)) < 0) {
-                fprintf(stderr, "Error writing to output file\n");
+                //fprintf(stderr, "Error writing to output file\n");
                 exit(1);
             }
             memset(buf, '\0', MAXLINE);
             sprintf(buf, "%s\n", job_list[i].cmdline);
             if(write(output_fd, buf, strlen(buf)) < 0) {
-                fprintf(stderr, "Error writing to output file\n");
+                //fprintf(stderr, "Error writing to output file\n");
                 exit(1);
             }
         }
