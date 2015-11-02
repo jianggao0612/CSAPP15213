@@ -243,7 +243,7 @@ int main(int argc, char **argv)
 
             } else {
 				
-				printf("Enter else.\n");
+				//printf("Enter else.\n");
                 listjobs(job_list, STDOUT_FILENO); // if there is no redirect output file, print jobs on standard system out
             }
 
@@ -256,9 +256,10 @@ int main(int argc, char **argv)
              * If so, get the job by job id
              * If not, get the job by process id
              */
+			
             if (token -> argv[(token -> argc) - 1][0] == '%') {
-
-                job_id = atoi((token -> argv[(token -> argc) - 1]) + 1); // get the job id, which is in the last argument except for the first %
+                
+				job_id = atoi((token -> argv[(token -> argc) - 1]) + 1); // get the job id, which is in the last argument except for the first %
                 job = getjobjid(job_list, job_id);
 
                 if (job == NULL) {
@@ -279,14 +280,14 @@ int main(int argc, char **argv)
                 }
 
             }
-
-            if (job -> state != BG) {
+			
+			printf("[%d] (%d) %s\n", job -> jid, job -> pid, job -> cmdline); // print out the BG job presentition to the     screen
+            if (job -> state != BG && job -> state != ST) {
 
                 printf("Current process is not a background job.\n");
 
             }
 
-            printf("[%d] (%d) %s", job -> jid, job -> pid, job -> cmdline); // print out the BG job presentition to the screen
             job -> state = BG; // set the job as background job
             kill(-(job -> pid), SIGCONT); // send signals to every process in the process group to continue
 
@@ -362,7 +363,6 @@ int main(int argc, char **argv)
  */
 void eval(char *cmdline) 
 {
-	//fprintf(stderr, "enter eval\n");
     int bg; /* should the job run in bg or fg? */
     struct cmdline_tokens tok;
 	pid_t pid; /* process id of each process */ 
@@ -370,7 +370,7 @@ void eval(char *cmdline)
     sigset_t set;
 	sigset_t prev_set;
     int input_fd, output_fd; /* input and output redirect file descriptor */
-
+	//printf("Got a cmdline %s\n", cmdline);
     /* Parse command line */
     bg = parseline(cmdline, &tok); 
 
@@ -478,14 +478,14 @@ void eval(char *cmdline)
 		 } else {
 			
 			job = getjobpid(job_list, pid);	
-			printf("[%d] (%d) %s", job -> jid, job -> pid, cmdline);
+			printf("[%d] (%d) %s\n", job -> jid, job -> pid, cmdline);
 			
 		 }
-		sigprocmask(SIG_UNBLOCK, &set, &prev_set);
+	
+		 sigprocmask(SIG_UNBLOCK, &set, &prev_set);
 
     }
 
-    return;
 }
 
 /* 
@@ -658,7 +658,7 @@ void sigchld_handler(int sig) {
      * If a child is stopped by a signal, set the job status as stopped
      * If a child is terminated by a signal that was not caught, delete the child from the job list
      */
-    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) >= 0) {
+    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0) {
 
         if (WIFEXITED(status)) {
 			//fprintf(stderr, "try to delete job in handler for pid:%d\n", pid);
@@ -666,13 +666,13 @@ void sigchld_handler(int sig) {
 
         } else if (WIFSTOPPED(status)) {
 
-            printf("Job [%d] (%d) is stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+            printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
             getjobpid(job_list, pid) -> state = ST; // the child was stopped by a signal 
 
         } else if (WIFSIGNALED(status)) { // the child was terminated by a signal that was not caught
 
-            deletejob(job_list, pid);
-            printf("Job [%d] (%d) is ternimated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+			deletejob(job_list, pid);
 
         }
 
