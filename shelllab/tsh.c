@@ -194,6 +194,7 @@ int main(int argc, char **argv)
  *
  */
  int cmd_builtins(struct cmdline_tokens *token) {
+
     FILE *output_file = NULL;
     int output_fd;
     int job_id;
@@ -243,8 +244,8 @@ int main(int argc, char **argv)
 
             } else {
 				
-				//printf("Enter else.\n");
                 listjobs(job_list, STDOUT_FILENO); // if there is no redirect output file, print jobs on standard system out
+
             }
 
             return 1;
@@ -281,8 +282,9 @@ int main(int argc, char **argv)
 
             }
 			
-			printf("[%d] (%d) %s\n", job -> jid, job -> pid, job -> cmdline); // print out the BG job presentition to the     screen
-            if (job -> state != BG && job -> state != ST) {
+			printf("[%d] (%d) %s\n", job -> jid, job -> pid, job -> cmdline); // print out the BG job presentition to the screen
+            
+            if ((job -> state != BG) && (job -> state != ST)) { // determine whether the job is currently a background job
 
                 printf("Current process is not a background job.\n");
 
@@ -334,6 +336,9 @@ int main(int argc, char **argv)
 
              }
 
+             /*
+              * Wait unti the foreground job finished
+              */
              while (fgpid(job_list)) {
 
                 sigsuspend(&set);
@@ -370,7 +375,7 @@ void eval(char *cmdline)
     sigset_t set;
 	sigset_t prev_set;
     int input_fd, output_fd; /* input and output redirect file descriptor */
-	//printf("Got a cmdline %s\n", cmdline);
+
     /* Parse command line */
     bg = parseline(cmdline, &tok); 
 
@@ -390,10 +395,17 @@ void eval(char *cmdline)
         /*
          * Block signals before the parent add the child into job list to avoid race condition and ensure parent can reap child process
          */
-        sigemptyset(&set);
-        sigaddset(&set, SIGINT);
-        sigaddset(&set, SIGTSTP);
-        sigaddset(&set, SIGCHLD);
+        if (sigemptyset(&set) < 0) {
+
+            unix_error("sigemptyset failed.\n");
+
+        }
+
+        if (sigaddset(&set, SIGINT) || sigaddset(&set, SIGTSTP) || sigaddset(&set, SIGCHLD)) {
+
+            unix_error("sigaddset failed.\n");
+
+        }
 
         if (sigprocmask(SIG_BLOCK, &set, &prev_set) < 0) {
 
@@ -401,12 +413,14 @@ void eval(char *cmdline)
 
         }
 		
-		// in child process
+		/*
+         * fork a child process to run the job
+         */
         if ((pid = fork()) == 0) {
-			//fprintf(stderr, "child fork\n");
  			
-			// asign unique group process to each child process 
-			// set the the group id as the process id
+			/* asign unique group process to each child process 
+			 * set the the group id as the process id
+             */
             if (setpgid(0, 0) < 0) {
 
                 unix_error("set process group failed.\n");
@@ -425,7 +439,12 @@ void eval(char *cmdline)
             if (tok.infile != NULL) {
 
                 input_fd = open(tok.infile, O_RDONLY);
-                dup2(input_fd, 0);
+
+                if (dup2(input_fd, 0) < 0) {
+
+                    unix_error("Failed to restore stdin.\n");
+
+                }
 
             }
 
@@ -433,10 +452,15 @@ void eval(char *cmdline)
             if (tok.outfile != NULL) {
 
                 output_fd = open(tok.outfile, O_WRONLY);
-                dup2(output_fd, 1);
+
+                if (dup2(output_fd, 1) < 0) {
+
+                    unix_error("Failed to restore stdout.\n");
+
+                }
 
             }
-           	//fprintf(stderr, "try to run child process with cmd:%s\n", tok.argv[0]); 
+
 			// execute a non-builtin process
 			if( execve(tok.argv[0], tok.argv, environ) < 0 ) {
 				
@@ -444,21 +468,10 @@ void eval(char *cmdline)
 				exit(0);
 
 			}
-			/* restore input and output */
-    		if (tok.infile) {
-        		if (dup2(input_fd, 0) < 0) 
-					printf("Failed to restore stdin\n");
-    		}
-    		if (tok.outfile) {
-        		if (dup2(output_fd, 1) < 0) 
-					printf("Failed to restore stdout\n");
-    		}	
-			//fprintf(stderr, "child process finished\n");
 
         }
 
         // parent process add the child process in the job list
-		//fprintf(stderr, "parents add child pid:%d\n", pid);
         addjob (job_list, pid, bg ? BG : FG, cmdline);	
 		
 		/*
@@ -469,11 +482,10 @@ void eval(char *cmdline)
 		if (!bg) {
 
             while (fgpid(job_list)) {
-				//fprintf(stderr, "parent tries to wait, cmd:%s\n", tok.argv[0]);
+
                 sigsuspend(&prev_set); // wait until get the signal that the foreground child process finishes
 
             }
-			//fprintf(stderr, "parent find all fg process finished\n");
             		
 		 } else {
 			
@@ -482,7 +494,7 @@ void eval(char *cmdline)
 			
 		 }
 	
-		 sigprocmask(SIG_UNBLOCK, &set, &prev_set);
+		 sigprocmask(SIG_UNBLOCK, &set, &prev_set); // unblock the signal set to receive any signals
 
     }
 
@@ -651,7 +663,7 @@ void sigchld_handler(int sig) {
 
     int status;
     pid_t pid;
-	//fprintf(stderr, "got and sigchld signal\n");
+
     /*
      * Reap child with the pid if the child is stopped or terminated
      * If a child is terminated normally, delete the child from the job list
@@ -661,7 +673,7 @@ void sigchld_handler(int sig) {
     while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0) {
 
         if (WIFEXITED(status)) {
-			//fprintf(stderr, "try to delete job in handler for pid:%d\n", pid);
+
             deletejob(job_list, pid); // the child ternimated normally
 
         } else if (WIFSTOPPED(status)) {
@@ -675,7 +687,6 @@ void sigchld_handler(int sig) {
 			deletejob(job_list, pid);
 
         }
-
 
     }
     return;
