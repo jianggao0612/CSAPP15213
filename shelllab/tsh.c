@@ -103,7 +103,13 @@ void app_error(char *msg);
 typedef void handler_t(int);
 handler_t *Signal(int signum, handler_t *handler);
 
-
+/* I/O function copied from csapp.c */
+static void sio_reverse(char s[]);
+static void sio_ltoa(long v, char s[], int b); 
+static size_t sio_strlen(char s[]);
+ssize_t sio_puts(char s[]);
+ssize_t sio_putl(long v);
+void sio_error(char s[]);
 
 /*
  * main - The shell's main routine 
@@ -257,7 +263,6 @@ int main(int argc, char **argv)
              * If so, get the job by job id
              * If not, get the job by process id
              */
-			
             if (token -> argv[(token -> argc) - 1][0] == '%') {
                 
 				job_id = atoi((token -> argv[(token -> argc) - 1]) + 1); // get the job id, which is in the last argument except for the first %
@@ -663,6 +668,7 @@ void sigchld_handler(int sig) {
 
     int status;
     pid_t pid;
+    int olderrno = errno; // store errno in handler
 
     /*
      * Reap child with the pid if the child is stopped or terminated
@@ -678,17 +684,39 @@ void sigchld_handler(int sig) {
 
         } else if (WIFSTOPPED(status)) {
 
-            printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+            /*
+             * Avoid printf() in handler, use helper function to write the output to stdout
+             */
+            sio_puts("Job [");
+            sio_putl(pid2jid(pid));
+            sio_puts("] (");
+            sio_putl(pid);
+            sio_puts(") stopped by signal ");
+            sio_putl(WSTOPSIG(status));
+            sio_puts("\n");
+
             getjobpid(job_list, pid) -> state = ST; // the child was stopped by a signal 
 
         } else if (WIFSIGNALED(status)) { // the child was terminated by a signal that was not caught
 
-            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            /*
+             * Avoid printf() in handler, use helper function to write the output to stdout
+             */
+            sio_puts("Job [");
+            sio_putl(pid2jid(pid));
+            sio_puts("] (");
+            sio_putl(pid);
+            sio_puts(") terminated by signal ");
+            sio_putl(WTERMSIG(status));
+            sio_puts("\n");
+
 			deletejob(job_list, pid);
 
         }
 
     }
+
+    errno = olderrno;
     return;
 }
 
@@ -700,6 +728,7 @@ void sigchld_handler(int sig) {
 void sigint_handler(int sig) {
 
     pid_t pid = fgpid(job_list); // get the pid of the foreground job
+    int olderrno = errno; // store errno in handler
 
     if (pid != 0) {
 
@@ -707,6 +736,7 @@ void sigint_handler(int sig) {
 
     }
 
+    errno = olderrno;
     return;
 }
 
@@ -718,12 +748,15 @@ void sigint_handler(int sig) {
 void sigtstp_handler(int sig) {
 
     pid_t pid = fgpid(job_list); // get the pid of the foreground job
+    int olderrno = errno; // store errno in handler
 
     if (pid != 0) {
 
         kill(-pid, SIGTSTP); // send signals to the process group and stop all the process
 
     }
+
+    errno = olderrno;
     return;
 }
 
@@ -966,5 +999,63 @@ void sigquit_handler(int sig)
 {
     printf("Terminating after receipt of SIGQUIT signal\n");
     exit(1);
+}
+
+/* $begin sioprivate */
+/* sio_reverse - Reverse a string (from K&R) */
+static void sio_reverse(char s[])
+{
+    int c, i, j;
+
+    for (i = 0, j = strlen(s)-1; i < j; i++, j--) {
+        c = s[i];
+        s[i] = s[j];
+        s[j] = c;
+    }
+}
+
+/* sio_ltoa - Convert long to base b string (from K&R) */
+static void sio_ltoa(long v, char s[], int b) 
+{
+    int c, i = 0;
+    
+    do {  
+        s[i++] = ((c = (v % b)) < 10)  ?  c + '0' : c - 10 + 'a';
+    } while ((v /= b) > 0);
+    s[i] = '\0';
+    sio_reverse(s);
+}
+
+/* sio_strlen - Return length of string (from K&R) */
+static size_t sio_strlen(char s[])
+{
+    int i = 0;
+
+    while (s[i] != '\0')
+        ++i;
+    return i;
+}
+/* $end sioprivate */
+
+/* Public Sio functions */
+/* $begin siopublic */
+
+ssize_t sio_puts(char s[]) /* Put string */
+{
+    return write(STDOUT_FILENO, s, sio_strlen(s)); //line:csapp:siostrlen
+}
+
+ssize_t sio_putl(long v) /* Put long */
+{
+    char s[128];
+    
+    sio_ltoa(v, s, 10); /* Based on K&R itoa() */  //line:csapp:sioltoa
+    return sio_puts(s);
+}
+
+void sio_error(char s[]) /* Put error message and exit */
+{
+    sio_puts(s);
+    _exit(1);                                      //line:csapp:sioexit
 }
 
