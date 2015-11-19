@@ -318,11 +318,35 @@ static void place(void* bp, size_t asize) {
  * free
  */
 void free (void *ptr) {
+
 	size_t size;
-	
+
+	/* 
+	 * Check whether the heap is empty
+	 * if so, illegal free operation
+	 */
+	if (heap_listp == NULL) {
+
+		printf("Segmentation Fault.\n");
+		return;
+
+	}
+
+
     if(!ptr) {
 
+    	size = GET_SIZE(HDRP(ptr));		// get size of the block
+    	PUT(HDRP(ptr), PACK(size, 0));	// update the header of the block
+    	PUT(FTRP(ptr), PACK(size, 0));	// update the footer of the block
+    	seg_list_insert(coalesce(ptr));			// return the block back to seg list
+
+    } else {
+
+    	printf("Segmentation Fault.\n");	// illegal free operation
     }
+
+    return;
+
 }
 
 static void *coalesce(void *bp) {
@@ -390,7 +414,100 @@ static void *coalesce(void *bp) {
  * realloc - you may want to look at mm-naive.c
  */
 void *realloc(void *oldptr, size_t size) {
-    return NULL;
+
+	size_t old_size;
+	size_t asize;
+	size_t new_size;
+	void* searchptr;
+	void* newptr;
+
+	// if oldptr is NULL, call malloc to assign memory
+	if (oldptr == NULL) 
+		return malloc(size);
+	// if size is 0, call free to free memory
+	if (size == 0) {
+		free(oldptr);
+		return NULL;
+	}
+
+	old_size = GET_SIZE(HDRP(oldptr));
+
+	/* Adjust block size to include overhead and alignment reqs. */
+	if (size <= DSIZE)
+		asize = 2 * DSIZE;
+	else 
+		asize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
+
+	if (asize == old_size) {
+
+		return oldptr;
+
+	} else if (asize < old_size) {
+
+		if (old_size - asize > 3 * DSIZE) {
+
+			PUT(HDRP(NEXT_BLKP(oldptr)), PACK(old_size - asize, 0));
+			PUT(FTRP(NEXT_BLKP(oldptr)), PACK(old_size - asize, 0));
+			PUT(HDRP(oldptr), PACK(asize, 1));
+			PUT(FTRP(oldptr), PACK(asize, 1));
+
+			seg_list_insert(NEXT_BLKP(oldptr));
+
+		} else {
+
+			PUT(HDRP(oldptr), PACK(asize, 1));
+			PUT(FTRP(oldptr), PACK(asize, 1));
+
+		}
+
+		return oldptr;
+
+	} else {
+
+		searchptr = oldptr;
+		new_size = old_size;
+
+		while(!GET_ALLOC(NEXT_BLKP(searchptr)) && ((new_size + GET_SIZE(NEXT_BLKP(searchptr))) < asize )) {
+			new_size += GET_SIZE(NEXT_BLKP(searchptr));
+			searchptr = NEXT_BLKP(searchptr);
+		}
+
+		if (new_size >= asize) {
+
+			if ((new_size - asize) > 3 * DSIZE) {
+
+				PUT(HDRP(NEXT_BLKP(searchptr)), PACK(new_size - asize, 0));
+				PUT(FTRP(NEXT_BLKP(searchptr)), PACK(new_size - asize, 0));
+				PUT(HDRP(oldptr), PACK(asize, 1));
+				PUT(FTRP(oldptr), PACK(asize, 1));
+
+				seg_list_insert(NEXT_BLKP(searchptr));
+
+			} else {
+
+				PUT(HDRP(oldptr), PACK(asize, 1));
+				PUT(FTRP(oldptr), PACK(asize, 1));
+
+			}
+
+			return oldptr;
+
+		} else {
+
+			newptr = malloc(asize);
+
+			if (newptr != NULL) {
+				memcpy(newptr, oldptr, old_size);
+				free(oldptr);
+			}
+
+			return newptr;
+
+		}
+
+	}
+
+
 }
 
 /*
