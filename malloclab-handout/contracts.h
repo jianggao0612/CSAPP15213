@@ -10,7 +10,7 @@
 /* Unlike typical header files, "contracts.h" may be
  * included multiple times, with and without DEBUG defined.
  */
-
+#define DEBUG
 #ifdef DEBUG
 
 #define ASSERT(COND) assert(COND)
