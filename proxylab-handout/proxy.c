@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "csapp.h"
+#include "cache.h"
 
 #define DEBUG
 #ifdef DEBUG
@@ -23,6 +24,7 @@
 #define CONNECTION       4
 #define PROXY_CONNECTION 5
 
+/* Constant strings for constructing request/response header */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 \
 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 static const char *accept_str = "Accept: text/html,\
@@ -38,6 +40,9 @@ static const char *uri_error_str = "Not found. Invalid URI.\r\n";
 static const char *invalid_request_response_str = "HTTP/1.1 400 \
 Bad Request\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n \
 <html><head></head><body><p>Webpage not found.</p></body></html>";
+
+/* cache for the proxy */
+cache_list_t* cache_list = NULL;
 
 int main(int argc, char **argv) {
 
@@ -70,7 +75,8 @@ int main(int argc, char **argv) {
     }
 
     Sem_init(&mutex, 0, 1);
-    listenfd = Open_listenfd(port);
+    cache_list = init_cache_list();     // initialize cache list
+    listenfd = Open_listenfd(port);     // ready for client request
 
     while (1) {
 
@@ -107,6 +113,7 @@ void echo(int fd) {
     char resource[MAXLINE];
     char remote_host_name[MAXLINE], remote_host_port[MAXLINE];
     char uri_check[7];
+    char cache_id[MAXLINE], cache_content[MAX_OBJECT_SIZE];
     int server_forward_fd;
 
     int flag[6];    // flag array to indentify request head settings
@@ -146,24 +153,67 @@ void echo(int fd) {
     }
     // parse needed information from the client request
     parse_uri(uri, remote_host_name, remote_host_port, protocol, resource);
-    // generate request line
-    strcpy(req_buf, method);
-    strcat(req_buf, " ");
-    strcat(req_buf, resource);
-    strcat(req_buf, " ");
-    strcat(req_buf, version);
-    strcat(req_buf, "\r\n");
-    // generate request headers according to the client header
-    while (Rio_readlineb(&rio, buf, MAXLINE) != 0) {
-        generate_request_header(buf, req_header_buf, flag);
-    }
-    // check whether request header contains all the required information
-    check_request_header(req_header_buf, flag, remote_host_name);
-    // generate complete request string
-    strcat(req_buf, request_header);
-    strcat(req_buf, "\r\n");
 
-    // TODO: Add read from cache
+    // generate cache id (GET www.cmu.edu:80/home.html HTTP/1.0)
+    strcpy(cache_id, method);
+    strcat(cache_id, " ");
+    strcat(cache_id, remote_host_name);
+    strcat(cache_id, ":");
+    strcat(cache_id, remote_host_port);
+    strcat(cache_id, resource);
+    strcat(cache_id, " ");
+    strcat(cache_id, version);
+
+    /*
+     * check whether the request page is in cache
+     * if hit, return to the client directly; if not, request from server
+     */
+    if (read_cache_list(cache_list, cache_id, cache_content)) {
+        if (Rio_writen(fd, cache_content, strlen(cache_content)) < 0) {
+            printf("rio_writen error from cache.\n");
+        }
+    } else {
+
+        // generate request line
+        strcpy(req_buf, method);
+        strcat(req_buf, " ");
+        strcat(req_buf, resource);
+        strcat(req_buf, " ");
+        strcat(req_buf, version);
+        strcat(req_buf, "\r\n");
+        // generate request headers according to the client header
+        while (Rio_readlineb(&rio, buf, MAXLINE) != 0) {
+            generate_request_header(buf, req_header_buf, flag);
+        }
+        // check whether request header contains all the required information
+        check_request_header(req_header_buf, flag, remote_host_name);
+        // generate complete request string
+        strcat(req_buf, request_header);
+        strcat(req_buf, "\r\n");
+
+        // TODO: read from server and write to cache
+    }
+
+}
+
+static int request_from_server(int* clientfd, char* req_buf, cache_list_t* list) {
+
+    int serverfd;
+
+    if (clientfd == NULL) {
+        printf("clientfd error.\n");
+        return 0;
+    }
+
+    if (req_buf == NULL) {
+        printf("request error.\n");
+        return 0;
+    }
+
+    if (list == NULL) {
+        printf("cache list empty error.\n");
+        return 0;
+    }
 
     /*
      * Request to server
@@ -197,7 +247,6 @@ void echo(int fd) {
 
     }
     V(&mutex);
-
 }
 
 /*
