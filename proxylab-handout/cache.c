@@ -1,6 +1,28 @@
+/*
+ * Name: Gao Jiang
+ * Andrew ID: gaoj
+ *
+ * cache.c - proxy cache implementations.
+ * Implementation idea: Use singly linked list for cache.
+ * 1. maintain head and rear pointers for the cache to simulate a queue
+ * 2. add node to the rear; access node and move it to the rear to implement lru
+ * 3. evict the head node when needed to implement lru
+ * 4. cache size is less than MAX_CACHE_SIZE, cache node size is less than MAX_OBJECT_SIZE
+ * 5. maintain a read lock and a write lock for the list to implement multi-thread
+ *
+ */
+#include "csapp.h"
+#include "cache.h"
+
+#define DEBUG
+#ifdef DEBUG
+# define dbg_printf(...) printf(__VA_ARGS__)
+#else
+# define dbg_printf(...)
+#endif
 
 /*
- * init_cache - initialize s cache list
+ * init_cache - initialize cache list
  *              return a pointer to the cache_list
  */
 cache_list_t* init_cache_list() {
@@ -20,11 +42,11 @@ cache_list_t* init_cache_list() {
 }
 
 /*
- * init_cache_node - initialize a cache node
- *                   return a pointer to the cache node
+ * create_cache_node - initialize a cache node
+ *                     return a pointer to the cache node
  */
 cache_node_t* create_cache_node(char* cache_id, char* cache_content,
-                              unsigned int length, cache_node_t* next) {
+                                unsigned int length, cache_node_t* next) {
 
     // create a cache node
     cache_node_t* cache_node = (cache_node_t *)malloc(sizeof(cache_node_t));
@@ -60,13 +82,13 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
 
 /*
  * add_cache_node_to_rear - add new cache node and move the recently accessed node to the rear
- *                          return 1 if successful; return 0 if error
+ *                          return -1 on error
  */
  int add_cache_node_to_rear(cache_list_t* list, cache_node_t* node) {
 
      // check whether the list is NULL
      if (list == NULL) {
-         return 0;
+         return -1;
      }
 
      // multi-thread write control
@@ -91,7 +113,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
      // unlock
      V(&(list -> write_mutex));
 
-     return 1;
+     return 0;
  }
 
  /*
@@ -122,47 +144,49 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
  /*
   * read_cache_list - read cache content from the node in cache list
   *                   and move the recently accessed node to list rear for lru
-  *                   return 1 if succeed; return 0 if error
+  *                   return -1 if on error
   */
  int read_cache_list(cache_list_t* list, char* id, char* content) {
 
      if (list == NULL) {
-         return 0;
+         return -1;
      }
 
      if (id == NULL) {
          printf("cache id error.\n");
-         return 0;
+         return -1;
      }
 
      // search for the node in cache list
      if ((node = search_cache_node(list, id)) == NULL) {
          // not found
          printf("cannot find the node in cache");
-         return 0;
+         return -1;
      } else {
+         P(&(list -> read_mutex));
          // found the node, access the cache content
          memcpy(content, node -> cache_content, node -> cache_length);
+         V(&(list -> read_mutex));
          // delete the node from current position
          node = delete_cache_node(list, id);
          // move the node to the rear of cache list
          add_cache_node_to_rear(list, node);
-         return 1;
+         return 0;
      }
  }
  /*
   * evict_cache_node - evict a cache node when the cache list is full according to lru
-  *                    return 1 if succeed; return 0 if error
+  *                    return -1 on error
   */
  int evict_cache_node(cache_list_t* list) {
 
      // check whether the list is NULL
      if (list == NULL) {
-         return 0;
+         return -1;
      }
 
      if (list -> head == NULL) {
-         return 0;
+         return -1;
      }
 
      // write lock
@@ -187,7 +211,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
      // free the space for the cache node
      free_cache_node(evicted_node);
 
-     return 1;
+     return 0;
 
  }
 

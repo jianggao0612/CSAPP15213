@@ -1,3 +1,8 @@
+/*
+ * Name: Gao Jiang
+ * Andrew ID: gaoj
+ *
+ */
 #include <stdio.h>
 #include "csapp.h"
 #include "cache.h"
@@ -24,6 +29,17 @@
 #define CONNECTION       4
 #define PROXY_CONNECTION 5
 
+/* Static helper functions for the proxy implementation */
+static int request_from_server(int clientfd, char* remote_host_name,
+                               char* remote_host_port, char* req_buf, cache_list_t* list,
+                               char* cache_id);
+static int generate_response(int clientfd, int serverfd,
+                             cache_list_t* list, char* cache_id);
+static void generate_request_header(char* buf, char* request_header, int* flag);
+static void check_request_header(char* request_header, int *flag, char* remote_host_name);
+static void parse_uri(char *uri, char *host_name, char *host_port, char *protocal, char *resource);
+static int isValidPort(char *port);
+
 /* Constant strings for constructing request/response header */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 \
 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
@@ -45,13 +61,10 @@ Bad Request\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n \
 cache_list_t* cache_list = NULL;
 
 int main(int argc, char **argv) {
-
     int listenfd, *connfd, port;
     struct sockaddr_in clientaddr;
     socklen_t clientlen;
     pthread_t tid;
-
-    sem_t mutex;
 
     Signal(SIGPIPE, SIG_IGN);   // ignore SIGPIPE signal
 
@@ -74,7 +87,6 @@ int main(int argc, char **argv) {
         printf("Illegal port.\n");
     }
 
-    Sem_init(&mutex, 0, 1);
     cache_list = init_cache_list();     // initialize cache list
     listenfd = Open_listenfd(port);     // ready for client request
 
@@ -88,7 +100,6 @@ int main(int argc, char **argv) {
     }
 
     return 0;
-
 }
 
 /*
@@ -125,7 +136,11 @@ void echo(int fd) {
     Rio_readinitb(&rio, fd);
     if (Rio_readlineb(&rio, buf, MAXLINE) == -1) {
         printf("Null request.\n");
-        return NULL;
+
+        if (fd >= 0) {
+            Close(fd);
+        }
+        return;
     }
 
     // get the content of the request
@@ -135,9 +150,13 @@ void echo(int fd) {
     if (strcmp(method, "GET")) {
         if (Rio_writen(fd, method_error_str, strlen(method_error_str)) == -1) {
             printf("rio_writen error.\n");
-            return;
         }
         printf("Not implemented. Sever only implements GET method.\n");
+
+        if (fd >= 0) {
+            Close(fd);
+        }
+
         return;
     }
 
@@ -146,11 +165,16 @@ void echo(int fd) {
     if (strcmp(uri_check, "http://")) {
         if (Rio_writen(fd, uri_error_str, strlen(uri_error_str)) == -1) {
             printf("rio_writen error.\n");
-            return;
         }
         printf("Not found. Invalid URI.\n");
+
+        if (fd >= 0) {
+            Close(fd);
+        }
+
         return;
     }
+
     // parse needed information from the client request
     parse_uri(uri, remote_host_name, remote_host_port, protocol, resource);
 
@@ -168,10 +192,18 @@ void echo(int fd) {
      * check whether the request page is in cache
      * if hit, return to the client directly; if not, request from server
      */
-    if (read_cache_list(cache_list, cache_id, cache_content)) {
+    if (read_cache_list(cache_list, cache_id, cache_content) != -1) {
+
         if (Rio_writen(fd, cache_content, strlen(cache_content)) < 0) {
             printf("rio_writen error from cache.\n");
         }
+
+        if (fd >= 0) {
+            Close(fd);
+        }
+
+        return;
+
     } else {
 
         // generate request line
@@ -191,71 +223,104 @@ void echo(int fd) {
         strcat(req_buf, request_header);
         strcat(req_buf, "\r\n");
 
-        // TODO: read from server and write to cache
+        if (request_from_server(fd, remote_host_name, remote_host_port,
+                                req_buf, cache_list, cache_id) == -1) {
+            printf("request from server error.\n");
+            if (fd >= 0) {
+                Close(fd);
+            }
+            Pthread_exit(NULL);
+        }
+
+        if (fd >= 0) {
+            Close(fd);
+        }
+        return;
     }
 
 }
 
-static int request_from_server(int* clientfd, char* req_buf, cache_list_t* list) {
+/*
+ * request_from_server - send request to the server to get response and cache it.
+ *                       return -1 on error
+ */
+static int request_from_server(int clientfd, char* remote_host_name, char* remote_host_port,
+                               char* req_buf, cache_list_t* list, char* cache_id) {
 
+    // file descriptor to connect to server
     int serverfd;
 
-    if (clientfd == NULL) {
-        printf("clientfd error.\n");
-        return 0;
-    }
-
+    // check arguments
     if (req_buf == NULL) {
         printf("request error.\n");
-        return 0;
+        return -1;
     }
 
     if (list == NULL) {
         printf("cache list empty error.\n");
-        return 0;
+        return -1;
     }
 
     /*
      * Request to server
      */
-    P(&mutex);
     // open listenfd to establish connection to server
-    if (server_forward_fd = Open_listenfd(remote_host_name, remote_host_port) < 0) {
+    if (serverfd = Open_listenfd(remote_host_name, remote_host_port) < 0) {
         printf("Connection to server error.\n");
         if (Rio_writen(fd, invalid_request_response_str, strlen(invalid_request_response_str)) == -1) {
             printf("rio_writen error.\n");
         }
-        // when error happens, safely close client connfd and server connfd, then exit
-        close_fd(&fd, &server_forward_fd);
-        Pthread_exit(NULL);
+        // when error happens, safely server connfd, then exit
+        if (serverfd >= 0) {
+            Close(serverfd);
+        }
+        return -1;
     } else {
-        if (Rio_writen(server_forward_fd, req_buf, strlen(req_buf)) < 0) {
+        if (Rio_writen(serverfd, req_buf, strlen(req_buf)) < 0) {
             printf("Request to server error.\n");
             if (Rio_writen(fd, invalid_request_response_str, strlen(invalid_request_response_str)) == -1) {
                 printf("rio_writen error.\n");
             }
-            close_fd(&fd, &server_forward_fd);
-            Pthread_exit(NULL);
+
+            // when error happens, safely server connfd, then exit
+            if (serverfd >= 0) {
+                Close(serverfd);
+            }
+            return -1;
         }
 
-        if (generate_response(fd, server_forward_fd) == -1) {
+        /*
+         * successfully connect to server and get server response
+         * then write to clientfd and cache response
+         */
+        if (generate_response(fd, serverfd, list, cache_id) == -1) {
             printf("Generate client response error.\n");
         }
 
-        close_fd(&fd, &server_forward_fd);
-        Pthread_exit(NULL);
+        /* close server fd */
+        if (serverfd >= 0) {
+            Close(serverfd);
+        }
+
+        return 0;
 
     }
-    V(&mutex);
 }
 
 /*
  * generate_response - helper function to generate response to the client
+ *                     and add the response to cache
+ *                     return -1 on error
  */
-static int generate_response(int clientfd, int serverfd) {
+static int generate_response(int clientfd, int serverfd,
+                             cache_list_t* list, char* cache_id) {
     rio_t rio;
     char buf[MAXLINE];
+    char cache_content[MAX_OBJECT_SIZE];
     unsigned int line_length = 0;
+    unsigned int curr_cache_length = 0;
+    bool valid_cache_size = true;
+    cache_node_t* node = NULL;
 
     // asscociate the serverfd with the read buffer
     Rio_readinitb(&rio, serverfd);
@@ -271,6 +336,12 @@ static int generate_response(int clientfd, int serverfd) {
         printf("rio_writen response status error.\n");
         return -1;
     }
+    if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
+        strcpy(cache_content, buf);
+        curr_cache_length += strlen(buf);
+    } else {
+        valid_cache_size = false;
+    }
 
     // read the server response header
     if (Rio_readlineb(&rio, buf, MAXLINE) == -1) {
@@ -283,6 +354,13 @@ static int generate_response(int clientfd, int serverfd) {
         if (Rio_writen(clientfd, buf, strlen(buf)) == -1) {
             printf("rio_writen response header error.\n");
             return -1;
+        }
+        // write a line of header to cache content if within the size
+        if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
+            strcat(cache_content, buf);
+            curr_cache_length += strlen(buf);
+        } else {
+            valid_cache_size = false;
         }
         // keep reading lines from the serverfd
         if (Rio_readlineb(&rio, buf, MAXLINE) == -1) {
@@ -298,11 +376,29 @@ static int generate_response(int clientfd, int serverfd) {
             printf("rio_writen response body error.\n");
             return -1;
         }
+        // write a line of response to cache content if within the size
+        if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
+            strcat(cache_content, buf);
+            curr_cache_length += strlen(buf);
+        } else {
+            valid_cache_size = false;
+        }
     }
     if (line_length == -1) {
         printf("rio_readnb response body error.\n");
         return -1;
     }
+
+    // add cache to cache list
+    if (valid_cache_size) {
+        node = create_cache_node(cache_id, cache_content, curr_cache_length, NULL);
+        if (node != NULL) {
+            if (add_cache_node_to_rear(list, node) == -1) {
+                printf("Add to cache error.\n");
+            }
+        }
+    }
+
     return 0;
 }
 
