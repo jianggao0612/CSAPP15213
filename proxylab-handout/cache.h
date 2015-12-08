@@ -10,14 +10,14 @@
 #define MAX_OBJECT_SIZE 102400
 
 /* Defined a struct representing the cache node in the cache list */
-typedef struct _cache_node_t {
+typedef struct cache_node_t {
     char* cache_id;
     char* cache_content;
-    usigned int cache_length;
+    unsigned int cache_length;
     struct cache_node_t* next;
 } cache_node_t;
 
-typedef struct _cache_list_t {
+typedef struct cache_list_t {
     struct cache_node_t* head;
     struct cache_node_t* rear;
     unsigned int unassigned_length;

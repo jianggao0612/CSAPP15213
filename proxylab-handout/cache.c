@@ -59,7 +59,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
     // initialize node id
     cache_node -> cache_id = (char *)malloc(sizeof(char) * (strlen(cache_id) + 1));
     // check whether malloc succeed
-    if (cache_node -> cache_id == NULL) {
+    if ((cache_node -> cache_id) == NULL) {
         printf("Create cache id error.\n");
         return NULL;
     }
@@ -68,7 +68,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
     // initialize node content
     cache_content = (char *)malloc(sizeof(char) * length);
     // check whether malloc succeed
-    if (cache_node -> cache_content = NULL) {
+    if ((cache_node -> cache_content) == NULL) {
         printf("Create cache content error.\n");
         return NULL;
     }
@@ -95,20 +95,20 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
      P(&(list -> write_mutex));
 
      // check whether the cache size is enough for the new node
-     while (list -> unassigned_length < node -> cache_length) {
+     while ((list -> unassigned_length) < (node -> cache_length)) {
          // if unassigend size is less than node size, evict according to lru
          evict_cache_node(list);
      }
 
      // add node to the cache list
-     if (list -> head == NULL) {
+     if ((list -> head) == NULL) {
          list -> head = node;
          list -> rear = node;
      } else {
          list -> rear -> next = node;
          list -> rear = node;
      }
-     list -> unassigned_length -= cache_length;
+     list -> unassigned_length -= node -> cache_length;
 
      // unlock
      V(&(list -> write_mutex));
@@ -134,7 +134,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
              V(&(list -> read_mutex));
              return node;
          }
-         node = node -> next;
+         node = (node -> next);
      }
 
      V(&(list -> read_mutex));
@@ -147,6 +147,8 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
   *                   return -1 if on error
   */
  int read_cache_list(cache_list_t* list, char* id, char* content) {
+	
+	 cache_node_t* node = NULL;
 
      if (list == NULL) {
          return -1;
@@ -171,8 +173,9 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
          node = delete_cache_node(list, id);
          // move the node to the rear of cache list
          add_cache_node_to_rear(list, node);
-         return 0;
      }
+	 
+     return 0;
  }
  /*
   * evict_cache_node - evict a cache node when the cache list is full according to lru

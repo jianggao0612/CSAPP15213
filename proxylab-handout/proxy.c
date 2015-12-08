@@ -35,10 +35,13 @@ static int request_from_server(int clientfd, char* remote_host_name,
                                char* cache_id);
 static int generate_response(int clientfd, int serverfd,
                              cache_list_t* list, char* cache_id);
-static void generate_request_header(char* buf, char* request_header, int* flag);
+static int* generate_request_header(char* buf, char* request_header, int* flag);
 static void check_request_header(char* request_header, int *flag, char* remote_host_name);
 static void parse_uri(char *uri, char *host_name, char *host_port, char *protocal, char *resource);
 static int isValidPort(char *port);
+
+void *thread(void *vargp);
+void echo(int fd);
 
 /* Constant strings for constructing request/response header */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 \
@@ -48,12 +51,10 @@ application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n";
 static const char *accept_encoding_str = "Accept-Encoding: gzip, deflate\r\n";
 static const char *connection_str = "Connection: close\r\n";
 static const char *proxy_connection_str = "Proxy-Connection: close\r\n";
-static const char *get_str = "GET ";
-static const char *version_str = " HTTP/1.0\r\n";
-static const char *method_error_str = "Not implemented.\
+char *method_error_str = "Not implemented.\
 Server only implements GET method.\r\n";
-static const char *uri_error_str = "Not found. Invalid URI.\r\n";
-static const char *invalid_request_response_str = "HTTP/1.1 400 \
+char *uri_error_str = "Not found. Invalid URI.\r\n";
+char *invalid_request_response_str = "HTTP/1.1 400 \
 Bad Request\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n \
 <html><head></head><body><p>Webpage not found.</p></body></html>";
 
@@ -62,6 +63,7 @@ cache_list_t* cache_list = NULL;
 
 int main(int argc, char **argv) {
     int listenfd, *connfd, port;
+	char* port_str;
     struct sockaddr_in clientaddr;
     socklen_t clientlen;
     pthread_t tid;
@@ -87,14 +89,15 @@ int main(int argc, char **argv) {
         printf("Illegal port.\n");
     }
 
+	port_str = argv[1];
     cache_list = init_cache_list();     // initialize cache list
-    listenfd = Open_listenfd(port);     // ready for client request
+    listenfd = Open_listenfd(port_str);     // ready for client request
 
     while (1) {
 
         clientlen = sizeof(struct sockaddr_in);
         connfd = Malloc(sizeof(int));
-        connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen);
+        *connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen);
         Pthread_create(&tid, NULL, thread, connfd);
 
     }
@@ -108,7 +111,7 @@ int main(int argc, char **argv) {
 void *thread(void *vargp) {
 
     int connfd = *((int *)vargp);
-    Pthread_detach(pthead_self);
+    Pthread_detach(pthread_self());
     Free(vargp);
     echo(connfd);   // main function for the proxy behavior
     Close(connfd);
@@ -120,15 +123,15 @@ void echo(int fd) {
     rio_t rio;
     char buf[MAXLINE], req_buf[MAXLINE], req_header_buf[MAXLINE];
     char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char protocal[MAXLINE];
+    char protocol[MAXLINE];
     char resource[MAXLINE];
     char remote_host_name[MAXLINE], remote_host_port[MAXLINE];
     char uri_check[7];
     char cache_id[MAXLINE], cache_content[MAX_OBJECT_SIZE];
-    int server_forward_fd;
 
     int flag[6];    // flag array to indentify request head settings
-    for (int i = 0; i < 6; i++) {
+	int i;
+    for (i = 0; i < 6; i++) {
         flag[i] = 0;
     }
 
@@ -148,9 +151,8 @@ void echo(int fd) {
 
     // check whether the request method is legal (only implement GET)
     if (strcmp(method, "GET")) {
-        if (Rio_writen(fd, method_error_str, strlen(method_error_str)) == -1) {
-            printf("rio_writen error.\n");
-        }
+
+        Rio_writen(fd, method_error_str, strlen(method_error_str));
         printf("Not implemented. Sever only implements GET method.\n");
 
         if (fd >= 0) {
@@ -163,9 +165,8 @@ void echo(int fd) {
     // check whether the request uri is legal
     strncpy(uri, uri_check, 7);
     if (strcmp(uri_check, "http://")) {
-        if (Rio_writen(fd, uri_error_str, strlen(uri_error_str)) == -1) {
-            printf("rio_writen error.\n");
-        }
+
+        Rio_writen(fd, uri_error_str, strlen(uri_error_str));
         printf("Not found. Invalid URI.\n");
 
         if (fd >= 0) {
@@ -194,9 +195,7 @@ void echo(int fd) {
      */
     if (read_cache_list(cache_list, cache_id, cache_content) != -1) {
 
-        if (Rio_writen(fd, cache_content, strlen(cache_content)) < 0) {
-            printf("rio_writen error from cache.\n");
-        }
+        Rio_writen(fd, cache_content, strlen(cache_content));
 
         if (fd >= 0) {
             Close(fd);
@@ -220,7 +219,7 @@ void echo(int fd) {
         // check whether request header contains all the required information
         check_request_header(req_header_buf, flag, remote_host_name);
         // generate complete request string
-        strcat(req_buf, request_header);
+        strcat(req_buf, req_header_buf);
         strcat(req_buf, "\r\n");
 
         if (request_from_server(fd, remote_host_name, remote_host_port,
@@ -265,35 +264,23 @@ static int request_from_server(int clientfd, char* remote_host_name, char* remot
      * Request to server
      */
     // open listenfd to establish connection to server
-    if (serverfd = Open_listenfd(remote_host_name, remote_host_port) < 0) {
+    if ((serverfd = Open_clientfd(remote_host_name, remote_host_port)) < 0) {
         printf("Connection to server error.\n");
-        if (Rio_writen(fd, invalid_request_response_str, strlen(invalid_request_response_str)) == -1) {
-            printf("rio_writen error.\n");
-        }
+        Rio_writen(clientfd, invalid_request_response_str, strlen(invalid_request_response_str));
         // when error happens, safely server connfd, then exit
         if (serverfd >= 0) {
             Close(serverfd);
         }
         return -1;
     } else {
-        if (Rio_writen(serverfd, req_buf, strlen(req_buf)) < 0) {
-            printf("Request to server error.\n");
-            if (Rio_writen(fd, invalid_request_response_str, strlen(invalid_request_response_str)) == -1) {
-                printf("rio_writen error.\n");
-            }
-
-            // when error happens, safely server connfd, then exit
-            if (serverfd >= 0) {
-                Close(serverfd);
-            }
-            return -1;
-        }
+        Rio_writen(serverfd, req_buf, strlen(req_buf));
+        Rio_writen(clientfd, invalid_request_response_str, strlen(invalid_request_response_str));
 
         /*
          * successfully connect to server and get server response
          * then write to clientfd and cache response
          */
-        if (generate_response(fd, serverfd, list, cache_id) == -1) {
+        if (generate_response(clientfd, serverfd, list, cache_id) == -1) {
             printf("Generate client response error.\n");
         }
 
@@ -319,7 +306,7 @@ static int generate_response(int clientfd, int serverfd,
     char cache_content[MAX_OBJECT_SIZE];
     unsigned int line_length = 0;
     unsigned int curr_cache_length = 0;
-    bool valid_cache_size = true;
+    int valid_cache_size = 1;
     cache_node_t* node = NULL;
 
     // asscociate the serverfd with the read buffer
@@ -331,16 +318,13 @@ static int generate_response(int clientfd, int serverfd,
         printf("rio_readline response status error.\n");
         return -1;
     }
-    if (Rio_writen(clientfd, buf, strlen(buf)) == -1) {
-        // write to the clientfd error
-        printf("rio_writen response status error.\n");
-        return -1;
-    }
+    Rio_writen(clientfd, buf, strlen(buf));
+
     if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
         strcpy(cache_content, buf);
         curr_cache_length += strlen(buf);
     } else {
-        valid_cache_size = false;
+        valid_cache_size = 0;
     }
 
     // read the server response header
@@ -351,16 +335,13 @@ static int generate_response(int clientfd, int serverfd,
     while (strcmp(buf, "\r\n") != 0) {
 
         // write a line of header to the clientfd
-        if (Rio_writen(clientfd, buf, strlen(buf)) == -1) {
-            printf("rio_writen response header error.\n");
-            return -1;
-        }
+        Rio_writen(clientfd, buf, strlen(buf));
         // write a line of header to cache content if within the size
         if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
             strcat(cache_content, buf);
             curr_cache_length += strlen(buf);
         } else {
-            valid_cache_size = false;
+            valid_cache_size = 0;
         }
         // keep reading lines from the serverfd
         if (Rio_readlineb(&rio, buf, MAXLINE) == -1) {
@@ -372,16 +353,13 @@ static int generate_response(int clientfd, int serverfd,
 
     // read the server response body
     while ((line_length = Rio_readnb(&rio, buf, MAXLINE)) > 0) {
-        if (Rio_writen(clientfd, buf, line_length) == -1) {
-            printf("rio_writen response body error.\n");
-            return -1;
-        }
+        Rio_writen(clientfd, buf, line_length);
         // write a line of response to cache content if within the size
         if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
             strcat(cache_content, buf);
             curr_cache_length += strlen(buf);
         } else {
-            valid_cache_size = false;
+            valid_cache_size = 0;
         }
     }
     if (line_length == -1) {
@@ -405,7 +383,7 @@ static int generate_response(int clientfd, int serverfd,
 /*
  * generate_request_header - helper function to generate request header
  */
-static void generate_request_header(char* buf, char* request_header, int* flag) {
+static int* generate_request_header(char* buf, char* request_header, int* flag) {
 
     if (strcmp(buf, "\r\n") == 0) {
         return flag;
@@ -445,7 +423,7 @@ static void check_request_header(char* request_header, int *flag, char* remote_h
     if (!flag[HOST]) {
         strcat(request_header, "Host: ");
         strcat(request_header, remote_host_name);
-        strcat("\r\n");
+        strcat(request_header, "\r\n");
         flag[HOST] = 1;
     }
     if (!flag[USER_AGENT]) {
@@ -474,7 +452,7 @@ static void check_request_header(char* request_header, int *flag, char* remote_h
 /*
  * parse_uri - helper function to parse the fields in the request uri string
  */
-static void parse_uri(char *uri, char *host_name, char *host_port, char *protocal, char *resource) {
+static void parse_uri(char *uri, char *host_name, char *host_port, char *protocol, char *resource) {
 
     char host_name_port[MAXLINE];
     char *tmp;
@@ -491,7 +469,7 @@ static void parse_uri(char *uri, char *host_name, char *host_port, char *protoca
     tmp = strstr(host_name_port, ":");
     if (tmp != NULL) {
         // if there is a host port, cut the str to "name" "port"
-        *tmp = "\0";
+        *tmp = '\0';
         // get the host port
         strcpy(host_port, tmp + 1);
     } else {
@@ -510,8 +488,9 @@ static void parse_uri(char *uri, char *host_name, char *host_port, char *protoca
 static int isValidPort(char *port) {
 
     int flag = 1;
+	int i;
 
-    for (int i = 0; i < strlen(port); i++) {
+    for (i = 0; i < strlen(port); i++) {
         // determine each char is within the ASCII of 0-9
         if (*port < '0' || *port > '9') {
             flag = 0;
