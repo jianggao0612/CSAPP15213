@@ -227,7 +227,7 @@ void echo(int fd) {
         // generate request line
         strcpy(req_buf, method);
         strcat(req_buf, " ");
-        strcat(req_buf, uri);
+        strcat(req_buf, resource);
         strcat(req_buf, " ");
         strcat(req_buf, version);
         strcat(req_buf, "\r\n");
@@ -239,10 +239,8 @@ void echo(int fd) {
         while (strcmp(buf, "\r\n")) {
 			dbg_printf("Enter loop to generate request header.\n");
             generate_request_header(buf, req_header_buf, flag);
-			dbg_printf("req_header_buf: %s\n", req_header_buf);
 			Rio_readlineb(&rio, buf, MAXLINE);
         }
-		dbg_printf("request header before check: %s\n", req_header_buf);
         // check whether request header contains all the required information
         check_request_header(req_header_buf, flag, remote_host_name);
 		dbg_printf("request header after check: %s\n", req_header_buf);
@@ -386,6 +384,15 @@ static int generate_response(int clientfd, int serverfd,
             return -1;
         }
 
+    }
+
+	Rio_writen(clientfd, buf, strlen(buf));
+    // write a line of header to cache content if within the size
+    if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
+        strcat(cache_content, buf);
+        curr_cache_length += strlen(buf);
+    } else {
+        valid_cache_size = 0;
     }
 
     // read the server response body

@@ -5,10 +5,13 @@
  * cache.c - proxy cache implementations.
  * Implementation idea: Use singly linked list for cache.
  * 1. maintain head and rear pointers for the cache to simulate a queue
- * 2. add node to the rear; access node and move it to the rear to implement lru
+ * 2. add node to the rear; access node
+ *    and move it to the rear to implement lru
  * 3. evict the head node when needed to implement lru
- * 4. cache size is less than MAX_CACHE_SIZE, cache node size is less than MAX_OBJECT_SIZE
- * 5. maintain a read lock and a write lock for the list to implement multi-thread
+ * 4. cache size is less than MAX_CACHE_SIZE,
+ *    cache node size is less than MAX_OBJECT_SIZE
+ * 5. maintain a read lock and a write lock for the list
+ *    to implement multi-thread
  *
  */
 #include "csapp.h"
@@ -147,7 +150,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
   *                   return -1 if on error
   */
  int read_cache_list(cache_list_t* list, char* id, char* content) {
-	
+
 	 cache_node_t* node = NULL;
 
      if (list == NULL) {
@@ -174,7 +177,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
          // move the node to the rear of cache list
          add_cache_node_to_rear(list, node);
      }
-	 
+
      return 0;
  }
  /*
