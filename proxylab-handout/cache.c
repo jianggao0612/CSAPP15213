@@ -66,7 +66,7 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
     strcpy(cache_node -> cache_id, cache_id);
 
     // initialize node content
-    cache_content = (char *)malloc(sizeof(char) * length);
+    cache_node -> cache_content = (char *)malloc(sizeof(char) * length);
     // check whether malloc succeed
     if ((cache_node -> cache_content) == NULL) {
         printf("Create cache content error.\n");

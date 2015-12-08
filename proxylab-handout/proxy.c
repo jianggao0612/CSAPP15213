@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     }
 
     port = atoi(argv[1]);   // get the port number
-
+	dbg_printf("Port number:%d\n", port);
     // check whether the port is within the legal range
     if ((port < 1000) || (port > 65535)) {
         printf("Illegal port.\n");
@@ -91,13 +91,15 @@ int main(int argc, char **argv) {
 
 	port_str = argv[1];
     cache_list = init_cache_list();     // initialize cache list
-    listenfd = Open_listenfd(port_str);     // ready for client request
+    dbg_printf("Cache list initialized successfully.\n");
+	listenfd = Open_listenfd(port_str);     // ready for client request
 
     while (1) {
 
         clientlen = sizeof(struct sockaddr_in);
         connfd = Malloc(sizeof(int));
         *connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen);
+		dbg_printf("connfd:%d\n", *connfd);
         Pthread_create(&tid, NULL, thread, connfd);
 
     }
@@ -120,6 +122,8 @@ void *thread(void *vargp) {
 }
 
 void echo(int fd) {
+
+	dbg_printf("Enter echo\n");
     rio_t rio;
     char buf[MAXLINE], req_buf[MAXLINE], req_header_buf[MAXLINE];
     char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
@@ -148,9 +152,13 @@ void echo(int fd) {
 
     // get the content of the request
     sscanf(buf, "%s %s %s", method, uri, version);
+	dbg_printf("method: %s\n", method);
+	dbg_printf("uri: %s\n", uri);
+	dbg_printf("version: %s\n", version);
 
     // check whether the request method is legal (only implement GET)
     if (strcmp(method, "GET")) {
+		dbg_printf("Enter not GET.\n");
 
         Rio_writen(fd, method_error_str, strlen(method_error_str));
         printf("Not implemented. Sever only implements GET method.\n");
@@ -163,14 +171,17 @@ void echo(int fd) {
     }
 
     // check whether the request uri is legal
-    strncpy(uri, uri_check, 7);
+    strncpy(uri_check, uri, 7);
+	dbg_printf("uri_check: %s\n", uri_check);
     if (strcmp(uri_check, "http://")) {
+		dbg_printf("Enter bad uri.\n");
 
         Rio_writen(fd, uri_error_str, strlen(uri_error_str));
         printf("Not found. Invalid URI.\n");
 
         if (fd >= 0) {
-            Close(fd);
+            dbg_printf("fd: %d\n", fd);
+			Close(fd);
         }
 
         return;
@@ -178,6 +189,10 @@ void echo(int fd) {
 
     // parse needed information from the client request
     parse_uri(uri, remote_host_name, remote_host_port, protocol, resource);
+	dbg_printf("remote_host_name: %s\n", remote_host_name);
+	dbg_printf("remote_host_port: %s\n", remote_host_port);
+	dbg_printf("protocol: %s\n", protocol);
+	dbg_printf("resource: %s\n", resource);
 
     // generate cache id (GET www.cmu.edu:80/home.html HTTP/1.0)
     strcpy(cache_id, method);
@@ -189,11 +204,14 @@ void echo(int fd) {
     strcat(cache_id, " ");
     strcat(cache_id, version);
 
-    /*
+	dbg_printf("cache_id: %s\n", cache_id);
+
+	/*
      * check whether the request page is in cache
      * if hit, return to the client directly; if not, request from server
      */
     if (read_cache_list(cache_list, cache_id, cache_content) != -1) {
+		dbg_printf("Enter cache hit.\n");
 
         Rio_writen(fd, cache_content, strlen(cache_content));
 
@@ -205,22 +223,34 @@ void echo(int fd) {
 
     } else {
 
+		dbg_printf("Enter request from server.\n");
         // generate request line
         strcpy(req_buf, method);
         strcat(req_buf, " ");
-        strcat(req_buf, resource);
+        strcat(req_buf, uri);
         strcat(req_buf, " ");
         strcat(req_buf, version);
         strcat(req_buf, "\r\n");
+
+		dbg_printf("req_buf: %s\n", req_buf);
+
+		Rio_readlineb(&rio, buf, MAXLINE);
         // generate request headers according to the client header
-        while (Rio_readlineb(&rio, buf, MAXLINE) != 0) {
+        while (strcmp(buf, "\r\n")) {
+			dbg_printf("Enter loop to generate request header.\n");
             generate_request_header(buf, req_header_buf, flag);
+			dbg_printf("req_header_buf: %s\n", req_header_buf);
+			Rio_readlineb(&rio, buf, MAXLINE);
         }
+		dbg_printf("request header before check: %s\n", req_header_buf);
         // check whether request header contains all the required information
         check_request_header(req_header_buf, flag, remote_host_name);
+		dbg_printf("request header after check: %s\n", req_header_buf);
         // generate complete request string
         strcat(req_buf, req_header_buf);
         strcat(req_buf, "\r\n");
+
+		dbg_printf("Complete request: %s\n", req_buf);
 
         if (request_from_server(fd, remote_host_name, remote_host_port,
                                 req_buf, cache_list, cache_id) == -1) {
@@ -234,7 +264,9 @@ void echo(int fd) {
         if (fd >= 0) {
             Close(fd);
         }
-        return;
+		Pthread_exit(NULL);
+
+       // return;
     }
 
 }
@@ -260,6 +292,9 @@ static int request_from_server(int clientfd, char* remote_host_name, char* remot
         return -1;
     }
 
+	dbg_printf("Enter request_from_server.\n");
+	dbg_printf("Request: %s\n.", req_buf);
+
     /*
      * Request to server
      */
@@ -274,7 +309,6 @@ static int request_from_server(int clientfd, char* remote_host_name, char* remot
         return -1;
     } else {
         Rio_writen(serverfd, req_buf, strlen(req_buf));
-        Rio_writen(clientfd, invalid_request_response_str, strlen(invalid_request_response_str));
 
         /*
          * successfully connect to server and get server response
@@ -309,6 +343,7 @@ static int generate_response(int clientfd, int serverfd,
     int valid_cache_size = 1;
     cache_node_t* node = NULL;
 
+	dbg_printf("Enter generate_response.\n");
     // asscociate the serverfd with the read buffer
     Rio_readinitb(&rio, serverfd);
 
@@ -318,6 +353,7 @@ static int generate_response(int clientfd, int serverfd,
         printf("rio_readline response status error.\n");
         return -1;
     }
+	dbg_printf("response status: %s\n", buf);
     Rio_writen(clientfd, buf, strlen(buf));
 
     if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
@@ -334,8 +370,9 @@ static int generate_response(int clientfd, int serverfd,
     }
     while (strcmp(buf, "\r\n") != 0) {
 
-        // write a line of header to the clientfd
-        Rio_writen(clientfd, buf, strlen(buf));
+        dbg_printf("response header: %s", buf);
+		// write a line of header to the clientfd
+		Rio_writen(clientfd, buf, strlen(buf));
         // write a line of header to cache content if within the size
         if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
             strcat(cache_content, buf);
@@ -458,26 +495,31 @@ static void parse_uri(char *uri, char *host_name, char *host_port, char *protoco
     char *tmp;
     // check whether the uri contains a protocal
     if (strstr(uri, "://") != NULL) {
+		dbg_printf("Enter have a protocol\n");
         // the uri contains a protocal
         sscanf(uri, "%[^:]://%[^/]%s", protocol, host_name_port, resource);
+		dbg_printf("host_name_port: %s\n", host_name_port);
     } else {
         // the uri doesn't contain a protocal
         sscanf(uri, "%[^/]%s", host_name_port, resource);
+		dbg_printf("host_name_port: %s\n", host_name_port);
     }
 
     // get the remote host name and remot host port
     tmp = strstr(host_name_port, ":");
     if (tmp != NULL) {
+		dbg_printf("Enter with a port.\n");
         // if there is a host port, cut the str to "name" "port"
         *tmp = '\0';
         // get the host port
         strcpy(host_port, tmp + 1);
+		dbg_printf("host_port_name with split: %s", tmp);
     } else {
         // if there is no host port, set it as default 80
         strcpy(host_port, "80");
     }
     // set the host name
-    strcpy(host_name_port, host_name);
+    strcpy(host_name, host_name_port);
 
 }
 
