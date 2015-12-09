@@ -2,12 +2,21 @@
  * Name: Gao Jiang
  * Andrew ID: gaoj
  *
+ * proxy.c - Multi-thread web proxy with cache.
+ * Implementation idea:
+ * 1. use multi-thread to allow concurrency
+ * 2. maintain global variable(cache list) update thread safe
+ *    using read and write lock
+ * 3. parse client request - form cache id - search for cache
+ *    if cache hit - form response and return
+ *    if cache miss - request from server and update cache
+ *
  */
 #include <stdio.h>
 #include "csapp.h"
 #include "cache.h"
 
-#define DEBUG
+//#define DEBUG
 #ifdef DEBUG
 # define dbg_printf(...) printf(__VA_ARGS__)
 #else
@@ -31,15 +40,19 @@
 
 /* Static helper functions for the proxy implementation */
 static int request_from_server(int clientfd, char* remote_host_name,
-                               char* remote_host_port, char* req_buf, cache_list_t* list,
-                               char* cache_id);
+         char* remote_host_port, char* req_buf, cache_list_t* list,
+         char* cache_id);
 static int generate_response(int clientfd, int serverfd,
-                             cache_list_t* list, char* cache_id);
-static int* generate_request_header(char* buf, char* request_header, int* flag);
-static void check_request_header(char* request_header, int *flag, char* remote_host_name);
-static void parse_uri(char *uri, char *host_name, char *host_port, char *protocal, char *resource);
+         cache_list_t* list, char* cache_id);
+static int* generate_request_header(char* buf,
+         char* request_header, int* flag);
+static void check_request_header(char* request_header, int *flag,
+         char* remote_host_name);
+static void parse_uri(char *uri, char *host_name, char *host_port,
+         char *protocal, char *resource);
 static int isValidPort(char *port);
 
+/* thread main routine and workding functions */
 void *thread(void *vargp);
 void echo(int fd);
 
@@ -51,6 +64,8 @@ application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n";
 static const char *accept_encoding_str = "Accept-Encoding: gzip, deflate\r\n";
 static const char *connection_str = "Connection: close\r\n";
 static const char *proxy_connection_str = "Proxy-Connection: close\r\n";
+
+/* Shared variables for constructing bad request */
 char *method_error_str = "Not implemented.\
 Server only implements GET method.\r\n";
 char *uri_error_str = "Not found. Invalid URI.\r\n";
@@ -61,6 +76,7 @@ Bad Request\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n \
 /* cache for the proxy */
 cache_list_t* cache_list = NULL;
 
+/* main entrance for the proxy */
 int main(int argc, char **argv) {
     int listenfd, *connfd, port;
 	char* port_str;
@@ -92,14 +108,16 @@ int main(int argc, char **argv) {
 	port_str = argv[1];
     cache_list = init_cache_list();     // initialize cache list
     dbg_printf("Cache list initialized successfully.\n");
+
 	listenfd = Open_listenfd(port_str);     // ready for client request
 
+    // proxy runs for accepting client request continuously
     while (1) {
 
         clientlen = sizeof(struct sockaddr_in);
         connfd = Malloc(sizeof(int));
         *connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen);
-		dbg_printf("connfd:%d\n", *connfd);
+        // create a thread to maintain concurrency
         Pthread_create(&tid, NULL, thread, connfd);
 
     }
@@ -121,16 +139,19 @@ void *thread(void *vargp) {
 
 }
 
+/*
+ * echo - the main function for the proxy to parse request and return response
+ */
 void echo(int fd) {
-
 	dbg_printf("Enter echo\n");
+
     rio_t rio;
     char buf[MAXLINE], req_buf[MAXLINE], req_header_buf[MAXLINE];
     char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char protocol[MAXLINE];
     char resource[MAXLINE];
     char remote_host_name[MAXLINE], remote_host_port[MAXLINE];
-    char uri_check[7];
+    char uri_check[7];  // for check whether the uri starting with "http://"
     char cache_id[MAXLINE], cache_content[MAX_OBJECT_SIZE];
 
     int flag[6];    // flag array to indentify request head settings
@@ -144,10 +165,13 @@ void echo(int fd) {
     if (Rio_readlineb(&rio, buf, MAXLINE) == -1) {
         printf("Null request.\n");
 
+        // when error happens, safely close the fd
         if (fd >= 0) {
             Close(fd);
         }
-        return;
+        // when error happens, safely close the thread without crash the proxy
+        Pthread_exit(NULL);
+
     }
 
     // get the content of the request
@@ -160,14 +184,16 @@ void echo(int fd) {
     if (strcmp(method, "GET")) {
 		dbg_printf("Enter not GET.\n");
 
+        // return error message to the client
         Rio_writen(fd, method_error_str, strlen(method_error_str));
         printf("Not implemented. Sever only implements GET method.\n");
 
+        // safely close clientfd and exit the thread
         if (fd >= 0) {
             Close(fd);
         }
+        Pthread_exit(NULL);
 
-        return;
     }
 
     // check whether the request uri is legal
@@ -179,12 +205,12 @@ void echo(int fd) {
         Rio_writen(fd, uri_error_str, strlen(uri_error_str));
         printf("Not found. Invalid URI.\n");
 
+        // safely close clientfd and exit the thread
         if (fd >= 0) {
             dbg_printf("fd: %d\n", fd);
 			Close(fd);
         }
-
-        return;
+        Pthread_exit(NULL);
     }
 
     // parse needed information from the client request
@@ -213,13 +239,14 @@ void echo(int fd) {
     if (read_cache_list(cache_list, cache_id, cache_content) != -1) {
 		dbg_printf("Enter cache hit.\n");
 
+        // read from cache and write to response directly
         Rio_writen(fd, cache_content, strlen(cache_content));
 
+        // safely close the clientfd and exit the thread
         if (fd >= 0) {
             Close(fd);
         }
-
-        return;
+        Pthread_exit(NULL);
 
     } else {
 
@@ -253,18 +280,20 @@ void echo(int fd) {
         if (request_from_server(fd, remote_host_name, remote_host_port,
                                 req_buf, cache_list, cache_id) == -1) {
             printf("request from server error.\n");
+
+            // safely close the clientfd and exit the thread
             if (fd >= 0) {
                 Close(fd);
             }
             Pthread_exit(NULL);
         }
 
+        // safely close the clientfd and exit the thread
         if (fd >= 0) {
             Close(fd);
         }
 		Pthread_exit(NULL);
 
-       // return;
     }
 
 }
@@ -273,8 +302,8 @@ void echo(int fd) {
  * request_from_server - send request to the server to get response and cache it.
  *                       return -1 on error
  */
-static int request_from_server(int clientfd, char* remote_host_name, char* remote_host_port,
-                               char* req_buf, cache_list_t* list, char* cache_id) {
+static int request_from_server(int clientfd, char* remote_host_name,
+char* remote_host_port, char* req_buf, cache_list_t* list, char* cache_id) {
 
     // file descriptor to connect to server
     int serverfd;
@@ -338,10 +367,12 @@ static int generate_response(int clientfd, int serverfd,
     char cache_content[MAX_OBJECT_SIZE];
     unsigned int line_length = 0;
     unsigned int curr_cache_length = 0;
+    // flag to check whether cache node size is within MAX_OBJECT_SIZE
     int valid_cache_size = 1;
     cache_node_t* node = NULL;
 
 	dbg_printf("Enter generate_response.\n");
+
     // asscociate the serverfd with the read buffer
     Rio_readinitb(&rio, serverfd);
 
@@ -426,6 +457,8 @@ static int generate_response(int clientfd, int serverfd,
 
 /*
  * generate_request_header - helper function to generate request header
+ *                           return flag array indicating whether the field
+ *                           is contained
  */
 static int* generate_request_header(char* buf, char* request_header, int* flag) {
 

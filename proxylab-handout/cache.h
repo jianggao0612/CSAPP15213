@@ -24,6 +24,7 @@ typedef struct cache_list_t {
     sem_t read_mutex, write_mutex;
 } cache_list_t;
 
+/* Defined function controling the proxy cache */
 cache_list_t* init_cache_list();
 cache_node_t* create_cache_node(char* cache_id, char* cache_content,
                                 unsigned int length, cache_node_t* next);

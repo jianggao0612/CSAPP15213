@@ -60,7 +60,8 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
     }
 
     // initialize node id
-    cache_node -> cache_id = (char *)malloc(sizeof(char) * (strlen(cache_id) + 1));
+    cache_node -> cache_id =
+        (char *)malloc(sizeof(char) * (strlen(cache_id) + 1));
     // check whether malloc succeed
     if ((cache_node -> cache_id) == NULL) {
         printf("Create cache id error.\n");
@@ -77,14 +78,17 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
     }
     memcpy(cache_node -> cache_content, cache_content, length);
 
+    // initialize cache length and cache next node
     cache_node -> cache_length = length;
     cache_node -> next = next;
 
     return cache_node;
+
 }
 
 /*
- * add_cache_node_to_rear - add new cache node and move the recently accessed node to the rear
+ * add_cache_node_to_rear - add new cache node
+ *                          and move the recently accessed node to the rear
  *                          return -1 on error
  */
  int add_cache_node_to_rear(cache_list_t* list, cache_node_t* node) {
@@ -113,35 +117,40 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
      }
      list -> unassigned_length -= node -> cache_length;
 
-     // unlock
+     // unlock the cache_list
      V(&(list -> write_mutex));
 
      return 0;
  }
 
  /*
-  * search_cache_node - search cache node in the cache list according to given id
+  * search_cache_node - search node in the cache list according to given id
   *                     return cache node if found; return NULL if not
   */
  cache_node_t* search_cache_node(cache_list_t* list, char* id) {
 
+     // check whether cache list is NULL
      if (list == NULL) {
          return NULL;
      }
 
+     // multi-thread read lock
      P(&(list -> read_mutex));
-     cache_node_t* node = list -> head;
 
+     // search for the given node
+     cache_node_t* node = list -> head;
      while (node != NULL) {
          if (strcmp(node -> cache_id, id) == 0) {
+             // if found, unlock the list
              V(&(list -> read_mutex));
              return node;
          }
          node = (node -> next);
      }
-
+     // unlock the list
      V(&(list -> read_mutex));
      return NULL;
+
  }
 
  /*
@@ -153,10 +162,11 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
 
 	 cache_node_t* node = NULL;
 
+     // check whether the list is NULL
      if (list == NULL) {
          return -1;
      }
-
+     // check whether the given id is NULL
      if (id == NULL) {
          printf("cache id error.\n");
          return -1;
@@ -168,9 +178,12 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
          printf("cannot find the node in cache");
          return -1;
      } else {
+
+         // multi-thread read lock
          P(&(list -> read_mutex));
          // found the node, access the cache content
          memcpy(content, node -> cache_content, node -> cache_length);
+         //unlock the cache list
          V(&(list -> read_mutex));
          // delete the node from current position
          node = delete_cache_node(list, id);
@@ -181,7 +194,8 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
      return 0;
  }
  /*
-  * evict_cache_node - evict a cache node when the cache list is full according to lru
+  * evict_cache_node - evict a cache node when the cache list is full
+  *                    according to lru
   *                    return -1 on error
   */
  int evict_cache_node(cache_list_t* list) {
@@ -190,12 +204,12 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
      if (list == NULL) {
          return -1;
      }
-
+     // check whether the list is empty
      if (list -> head == NULL) {
          return -1;
      }
 
-     // write lock
+     // multi-thread write lock
      P(&(list -> write_mutex));
 
      // get the evicted node
@@ -227,19 +241,23 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
   */
  cache_node_t* delete_cache_node(cache_list_t* list, char* id) {
 
+     // check whether the list is empty
      if (list == NULL) {
          return NULL;
      }
 
+     // multi-thread write lock
      P(&(list -> write_mutex));
+
      cache_node_t* pre_node = NULL;
      cache_node_t* curr_node = list -> head;
 
+     // find the node and delete it
      while (curr_node != NULL) {
 
          // if found, delete the node and return
          if (strcmp(curr_node -> cache_id, id) == 0) {
-             // corner case
+             // update the head if necessary
              if (curr_node == list -> head) {
                  list -> head = curr_node -> next;
              }
@@ -248,14 +266,17 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
                  pre_node -> next = curr_node -> next;
              }
 
-             // corner case
+             // update the rear if necessary
              if (curr_node == list -> rear) {
                  list -> rear = pre_node;
                  list -> rear -> next = NULL;
              }
 
+             // update the unused length of the cache list
              list -> unassigned_length += curr_node -> cache_length;
+             // unlock the cache List if found
              V(&(list -> write_mutex));
+
              return curr_node;
          }
 
@@ -263,7 +284,9 @@ cache_node_t* create_cache_node(char* cache_id, char* cache_content,
          curr_node = curr_node -> next;
      }
 
+     // unlock the list
      V(&(list -> write_mutex));
+     
      return NULL;
 
  }
