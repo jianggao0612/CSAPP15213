@@ -386,7 +386,7 @@ static int generate_response(int clientfd, int serverfd,
     Rio_writen(clientfd, buf, strlen(buf));
 
     if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
-        strcpy(cache_content, buf);
+        memcpy(cache_content + curr_cache_length, buf, strlen(buf));
         curr_cache_length += strlen(buf);
     } else {
         valid_cache_size = 0;
@@ -404,7 +404,7 @@ static int generate_response(int clientfd, int serverfd,
 		Rio_writen(clientfd, buf, strlen(buf));
         // write a line of header to cache content if within the size
         if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
-            strcat(cache_content, buf);
+            memcpy(cache_content + curr_cache_length, buf, strlen(buf));
             curr_cache_length += strlen(buf);
         } else {
             valid_cache_size = 0;
@@ -420,7 +420,7 @@ static int generate_response(int clientfd, int serverfd,
 	Rio_writen(clientfd, buf, strlen(buf));
     // write a line of header to cache content if within the size
     if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
-        strcat(cache_content, buf);
+        memcpy(cache_content + curr_cache_length, buf, strlen(buf));
         curr_cache_length += strlen(buf);
     } else {
         valid_cache_size = 0;
@@ -430,9 +430,9 @@ static int generate_response(int clientfd, int serverfd,
     while ((line_length = Rio_readnb(&rio, buf, MAXLINE)) > 0) {
         Rio_writen(clientfd, buf, line_length);
         // write a line of response to cache content if within the size
-        if (valid_cache_size && (curr_cache_length + strlen(buf)) < MAX_OBJECT_SIZE) {
-            strcat(cache_content, buf);
-            curr_cache_length += strlen(buf);
+        if (valid_cache_size && (curr_cache_length + line_length) < MAX_OBJECT_SIZE) {
+            memcpy(cache_content + curr_cache_length, buf, line_length);
+            curr_cache_length += line_length;
         } else {
             valid_cache_size = 0;
         }
